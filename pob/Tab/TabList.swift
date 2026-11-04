@@ -1,6 +1,6 @@
 import Foundation
 
-struct TabRecord: Codable, Equatable, Identifiable {
+nonisolated struct TabRecord: Codable, Equatable, Identifiable {
     let id: UUID
     var url: URL?
     var title: String

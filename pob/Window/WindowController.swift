@@ -1,7 +1,7 @@
 import AppKit
 import WebKit
 
-final class WindowController: NSWindowController, NSPopoverDelegate {
+final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDelegate {
     let tabs: TabManager
     var tab: Tab? { tabs.activeTab }
     let rail = Rail()
@@ -13,6 +13,10 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
     private(set) var railState = RailState()
     /// Replaceable because tests need history to answer late.
     var searchHistory: (String) async -> [HistoryEntry]
+    var onTabsChanged: (() -> Void)?
+    var onClose: (() -> Void)?
+    /// `AppController` owns the windows, and the switcher's New Window row starts here.
+    var onNewWindow: (() -> Void)?
 
     private let appearance: AppearanceModel
     private let contentView = NSView()
@@ -47,6 +51,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
         window.minSize = NSSize(width: 480, height: 360)
         window.center()
         super.init(window: window)
+        window.delegate = self
 
         buildContent(in: window)
         connectRail()
@@ -61,6 +66,21 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
+
+    /// nil for a window with no tabs, which leaves nothing to bring back.
+    var snapshot: WindowSnapshot? {
+        guard let window, !tabs.isEmpty else { return nil }
+        let records = tabs.snapshotRecords
+        return WindowSnapshot(
+            tabs: records,
+            activeIndex: records.firstIndex { $0.id == tabs.list.activeID } ?? 0,
+            frame: window.frameDescriptor
+        )
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        onClose?()
+    }
 
     func applyAppearance() {
         guard let window else { return }
@@ -108,8 +128,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
         case .selectTab9: tabs.activate(index: 8)
         case .openSwitcher, .openSwitcherFromPage:
             openSwitcher()
-        case .newWindow:
-            break // shortcut: there's one window for now, open another here when AppController manages several
+        case .newWindow: onNewWindow?()
         case .toggleRail:
             railState.toggleShortcut()
             if railState.visibility == .hidden {
@@ -378,7 +397,10 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
         rail.tabList.onClose = { [weak self] in self?.tabs.close($0) }
         rail.tabList.onMove = { [weak self] in self?.tabs.move(from: $0, to: $1) }
         rail.tabList.onNewTab = { [weak self] in self?.perform(.openSwitcher) }
-        tabs.onChange = { [weak self] in self?.updateRailContents() }
+        tabs.onChange = { [weak self] in
+            self?.updateRailContents()
+            self?.onTabsChanged?()
+        }
         tabs.onLoadFinished = { [weak self] finished in
             guard let self, finished === tab else { return }
             pill.show(url: finished.webView.url)

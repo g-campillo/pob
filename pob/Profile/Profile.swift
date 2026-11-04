@@ -16,6 +16,8 @@ final class Profile {
 
     lazy var favicons = FaviconStore(directory: faviconDirectory)
 
+    lazy var session = SessionStore(file: JSONFile(url: directory.appending(path: "session.json")))
+
     private let faviconDirectory: URL
 
     /// Built ahead of time, so a new tab doesn't wait for a web view.

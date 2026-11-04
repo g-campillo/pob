@@ -1,6 +1,6 @@
 import Foundation
 
-struct JSONFile<Value: Codable> {
+nonisolated struct JSONFile<Value: Codable> {
     let url: URL
 
     /// nil when the file is missing or unreadable.

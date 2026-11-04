@@ -6,17 +6,28 @@ final class AppController: NSObject, NSApplicationDelegate {
         ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
     }
 
-    private var appearance: AppearanceModel?
-    private var windowController: WindowController?
+    private(set) var windows: [WindowController] = []
+    /// Both are set at launch, past the test-host check, so a test run can't reach the real profile. Tests set their own.
+    var profile: Profile?
+    var appearance: AppearanceModel?
     private var commands: CommandList?
     private var keyMonitor: Any?
     private var displayOptionsObserver: NSObjectProtocol?
     private var phaseTimer: Timer?
     private var memoryPressureSource: (any DispatchSourceMemoryPressure)?
 
-    /// A sheet or a detached inspector in front keeps its keys.
+    /// A sheet, a popover or a detached inspector in front keeps its keys.
     private var isBrowserWindowKey: Bool {
-        NSApp.keyWindow === windowController?.window
+        controller(of: NSApp.keyWindow) != nil
+    }
+
+    private var isShowingAWindow: Bool {
+        windows.contains { $0.window?.isVisible == true }
+    }
+
+    /// Reads every live page's state, so it's built when a save happens and not on every change.
+    var sessionSnapshot: SessionSnapshot {
+        SessionSnapshot(windows: windows.compactMap(\.snapshot))
     }
 
     static func main() {
@@ -29,6 +40,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard !Self.isRunningTests else { return }
 
+        profile = .initial
         Task { await Profile.initial.history.prune(before: Date().addingTimeInterval(-365 * 86_400)) }
 
         let appearance = AppearanceModel(
@@ -38,29 +50,85 @@ final class AppController: NSObject, NSApplicationDelegate {
         self.appearance = appearance
         observeDisplayOptions(appearance)
 
-        let tabs = TabManager(profile: .initial)
-        let windowController = WindowController(appearance: appearance, tabs: tabs)
-        self.windowController = windowController
-
-        let commands = CommandList.standard { [weak self] id in
-            guard let self, isBrowserWindowKey else { return }
-            self.windowController?.perform(id)
-        }
+        let commands = CommandList.standard { [weak self] in self?.perform($0, keyWindow: NSApp.keyWindow) }
         self.commands = commands
         let menu = MainMenu.build(commands: commands)
         NSApp.mainMenu = menu
         NSApp.windowsMenu = menu.item(withTitle: "Window")?.submenu
         installReservedShortcuts()
         watchTabPhases()
+        restoreSession()
+    }
 
-        windowController.showWindow(nil)
-        NSApp.activate()
-        windowController.perform(.openSwitcher)
-        Task { tabs.profile.prepareSpareTab() } // no launch tab asked for one, and the first Return shouldn't wait
+    /// A test run has no windows, so saving here would blank the real session.
+    func applicationWillTerminate(_ notification: Notification) {
+        guard !Self.isRunningTests else { return }
+        profile?.session.save(sessionSnapshot)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        false
+    }
+
+    /// AppKit brings back a minimized window when this returns true, so only having none at all needs a new one.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if windows.isEmpty {
+            openWindow(restoring: nil)
+        }
+        return true
+    }
+
+    /// Opens the saved windows, or one empty window when there are none, as after a session that failed to load.
+    func restoreSession() {
+        for window in profile?.session.load().windows ?? [] {
+            openWindow(restoring: window)
+        }
+        if windows.isEmpty {
+            openWindow(restoring: nil)
+        }
+    }
+
+    func openWindow(restoring snapshot: WindowSnapshot?) {
+        guard let profile, let appearance else { return }
+        let controller = WindowController(appearance: appearance, tabs: TabManager(profile: profile, restoring: snapshot))
+        if let snapshot {
+            controller.window?.setFrame(from: snapshot.frame)
+        }
+        controller.onTabsChanged = { [weak self] in self?.saveSessionSoon() }
+        controller.onNewWindow = { [weak self] in self?.openWindow(restoring: nil) }
+        controller.onClose = { [weak self, weak controller] in
+            self?.windows.removeAll { $0 === controller }
+            self?.saveSessionSoon()
+        }
+        windows.append(controller)
+
+        if !Self.isRunningTests { // hosted windows stay off screen
+            controller.showWindow(nil)
+            NSApp.activate()
+        }
+        if controller.tabs.isEmpty {
+            controller.perform(.openSwitcher)
+        }
+        Task { profile.prepareSpareTab() } // no launch tab asked for one, and the first Return shouldn't wait
+    }
+
+    /// Commands act on the key window. Anything else that's key keeps its keys, so "no window" means nothing is key
+    /// and no browser window is showing. A minimized one doesn't count, or ⌘N would do nothing.
+    func perform(_ id: CommandID, keyWindow: NSWindow?) {
+        if let controller = controller(of: keyWindow) {
+            controller.perform(id)
+        } else if keyWindow == nil, !isShowingAWindow, [.openSwitcher, .openSwitcherFromPage, .newWindow].contains(id) {
+            openWindow(restoring: nil)
+        }
+    }
+
+    private func controller(of window: NSWindow?) -> WindowController? {
+        windows.first { $0.window === window }
+    }
+
+    /// Holds `self` until the save runs, because a snapshot taken after it was gone would be empty.
+    private func saveSessionSoon() {
+        profile?.session.saveSoon { self.sessionSnapshot }
     }
 
     private func observeDisplayOptions(_ appearance: AppearanceModel) {
@@ -87,17 +155,19 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// Both handlers run on the main thread: the timer on the run loop it was scheduled from, the source on `.main`.
     private func watchTabPhases() {
         phaseTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.updateTabPhases(memoryPressure: false) }
+            MainActor.assumeIsolated { self?.updateTabPhases(now: .now, memoryPressure: false) }
         }
         let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
         source.setEventHandler { [weak self] in
-            MainActor.assumeIsolated { self?.updateTabPhases(memoryPressure: true) }
+            MainActor.assumeIsolated { self?.updateTabPhases(now: .now, memoryPressure: true) }
         }
         source.activate()
         memoryPressureSource = source
     }
 
-    private func updateTabPhases(memoryPressure: Bool) {
-        windowController?.tabs.updatePhases(now: .now, memoryPressure: memoryPressure)
+    func updateTabPhases(now: Date, memoryPressure: Bool) {
+        for controller in windows {
+            controller.tabs.updatePhases(now: now, memoryPressure: memoryPressure)
+        }
     }
 }

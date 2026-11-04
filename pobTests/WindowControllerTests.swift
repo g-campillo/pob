@@ -276,9 +276,12 @@ import WebKit
         #expect(tabs.list.records.count == 10)
         #expect(tabs.list.activeID == ids[1])
     }
-    @Test func newWindowDoesNothingYet() {
+    @Test func newWindowAsksForOneAndLeavesThisWindowsTabsAlone() {
         let (controller, _) = make()
+        var asked = 0
+        controller.onNewWindow = { asked += 1 }
         controller.perform(.newWindow)
+        #expect(asked == 1)
         #expect(controller.tabs.list.records.count == 1)
     }
     @Test func commandsAreSafeWithNoTabs() {

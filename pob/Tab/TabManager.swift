@@ -20,13 +20,28 @@ final class TabManager {
     private var openers: [UUID: UUID] = [:]
     private var recordedTitles: [UUID: String] = [:]
 
-    init(profile: Profile, keepsSpare: Bool = true) {
+    /// Restored tabs start saved, except the active one, so a launch builds one web view per window.
+    init(profile: Profile, keepsSpare: Bool = true, restoring snapshot: WindowSnapshot? = nil) {
         self.profile = profile
         self.keepsSpare = keepsSpare
+        if let snapshot {
+            changeList { $0 = TabList(records: snapshot.tabs, activeID: snapshot.activeID) }
+        }
     }
 
     var isEmpty: Bool { list.records.isEmpty }
     var activeTab: Tab? { list.activeID.flatMap(liveTab) }
+
+    /// The records with each live page's place read now, which isn't free, so it's for saving and not for every change.
+    var snapshotRecords: [TabRecord] {
+        list.records.map { record in
+            var record = record
+            if let tab = tabs[record.id] {
+                capture(tab, in: &record)
+            }
+            return record
+        }
+    }
 
     func phase(of id: UUID) -> TabPhase { phases[id] ?? .saved }
     func liveTab(_ id: UUID) -> Tab? { tabs[id] }
@@ -102,6 +117,7 @@ final class TabManager {
         }
         tab.onLoadFinished = { [weak self, weak tab] in
             if let tab {
+                self?.list.update(id) { $0.interactionState = nil } // the page is back, so its own state counts from here
                 self?.recordVisit(of: tab)
                 self?.refreshFavicon(of: tab)
                 self?.onLoadFinished?(tab)
@@ -182,15 +198,21 @@ final class TabManager {
     /// Keeps the page's place in its record and lets go of the web view.
     private func release(_ id: UUID) {
         guard let tab = tabs.removeValue(forKey: id) else { return }
-        list.update(id) { record in
-            record.url = tab.webView.url ?? record.url
-            record.title = tab.webView.title ?? record.title
-            record.interactionState = tab.webView.interactionState as? Data
-        }
+        list.update(id) { capture(tab, in: &$0) }
         tab.pageView.removeFromSuperview()
         phases[id] = nil
         lastActive[id] = nil
         recordedTitles[id] = nil
+    }
+
+    /// A page on its way back keeps what it had. It has no title yet, and WebKit's state for a page in mid-load
+    /// restores as a fresh load of it, which loses the forward list.
+    private func capture(_ tab: Tab, in record: inout TabRecord) {
+        record.url = tab.webView.url ?? record.url
+        record.title = tab.title.isEmpty ? record.title : tab.title
+        if record.interactionState == nil || !tab.webView.isLoading {
+            record.interactionState = tab.webView.interactionState as? Data ?? record.interactionState
+        }
     }
 
     private func setPhase(_ phase: TabPhase, of id: UUID) {
