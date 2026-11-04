@@ -39,7 +39,6 @@ final class AppController: NSObject, NSApplicationDelegate {
         observeDisplayOptions(appearance)
 
         let tabs = TabManager(profile: .initial)
-        tabs.newTab(.url(URL(string: "about:blank")!), activate: true)
         let windowController = WindowController(appearance: appearance, tabs: tabs)
         self.windowController = windowController
 
@@ -56,7 +55,8 @@ final class AppController: NSObject, NSApplicationDelegate {
 
         windowController.showWindow(nil)
         NSApp.activate()
-        windowController.perform(.focusAddress)
+        windowController.perform(.openSwitcher)
+        Task { tabs.profile.prepareSpareTab() } // no launch tab asked for one, and the first Return shouldn't wait
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

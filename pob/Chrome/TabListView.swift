@@ -12,7 +12,7 @@ final class TabListView: NSView, NSTableViewDataSource, NSTableViewDelegate {
     private(set) var isDragging = false
 
     private static let rowType = NSPasteboard.PasteboardType("com.pob.tab-row")
-    private let table = RailTable()
+    private let table = ClickOnlyTable()
     private var records: [TabRecord] = []
     private var activeID: UUID?
 
@@ -139,13 +139,19 @@ final class TabListView: NSView, NSTableViewDataSource, NSTableViewDelegate {
     }
 }
 
-/// A click on a row must not take the keyboard from the page.
-private final class RailTable: NSTableView {
+/// A click on a row must not take the keyboard from the page or a text field.
+final class ClickOnlyTable: NSTableView {
     override var acceptsFirstResponder: Bool { false }
 }
 
-private final class ActiveFill: NSView {
+/// Marks a row on glass. Set `wantsLayer`, and the color follows the appearance.
+final class ActiveFill: NSView {
     override var cornerConfiguration: NSViewCornerConfiguration { .uniformCorners(radius: .containerConcentric(6)) }
+    override var wantsUpdateLayer: Bool { true }
+
+    override func updateLayer() {
+        layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
+    }
 }
 
 private final class TabRow: NSView {
@@ -160,7 +166,6 @@ private final class TabRow: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         fill.wantsLayer = true
-        fill.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
 
         tile.imageScaling = .scaleProportionallyUpOrDown
 

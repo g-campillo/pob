@@ -10,11 +10,13 @@ final class Rail: NSView, NSTextFieldDelegate {
     var onSettings: (() -> Void)?
     var onNavigate: ((CommandID) -> Void)?
     var onAddressFocus: (() -> Void)?
+    var onAddressChange: ((String) -> Void)?
     var onAddressEndEditing: (() -> Void)?
     var onPointerExit: (() -> Void)?
 
     let addressField: NSTextField = AddressField()
     let tabList = TabListView()
+    let suggestions = SwitcherList(selectsFirstRow: false)
     let pinned = PinnedBookmarksView()
     private(set) lazy var settingsButton = iconButton("gearshape", label: "Settings", action: #selector(settingsPressed))
 
@@ -44,6 +46,13 @@ final class Rail: NSView, NSTextFieldDelegate {
         pinned.isHidden = bookmarks.isEmpty // a hidden row takes no space in the stack
     }
 
+    /// Rows replace the tab list. With none, the tab list comes back.
+    func showSuggestions(_ rows: [SwitcherRow]) {
+        suggestions.show(rows)
+        suggestions.isHidden = rows.isEmpty
+        tabList.isHidden = !rows.isEmpty
+    }
+
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
         if let trackingArea {
@@ -66,14 +75,30 @@ final class Rail: NSView, NSTextFieldDelegate {
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         switch commandSelector {
         case #selector(NSResponder.insertNewline(_:)):
-            onSubmit?(addressField.stringValue)
+            // Only a row the user arrowed to replaces what they typed.
+            if let row = suggestions.selection {
+                suggestions.onChoose?(row)
+            } else {
+                onSubmit?(addressField.stringValue)
+            }
             return true
         case #selector(NSResponder.cancelOperation(_:)):
             onCancel?()
             return true
+        case #selector(NSResponder.moveUp(_:)) where !suggestions.isHidden:
+            suggestions.moveSelection(by: -1)
+            return true
+        case #selector(NSResponder.moveDown(_:)) where !suggestions.isHidden:
+            suggestions.moveSelection(by: 1)
+            return true
         default:
             return false
         }
+    }
+
+    func controlTextDidChange(_ notification: Notification) {
+        suggestions.clearPick()
+        onAddressChange?(addressField.stringValue)
     }
 
     func controlTextDidEndEditing(_ notification: Notification) {
@@ -81,37 +106,11 @@ final class Rail: NSView, NSTextFieldDelegate {
     }
 
     private func buildGlass() {
-        let glass = NSGlassEffectView()
-        glass.style = .regular
-        glass.cornerRadius = 18
-
-        let content = NSView()
-        content.translatesAutoresizingMaskIntoConstraints = false
-        glass.contentView = content
-
-        let container = NSGlassEffectContainerView()
-        container.contentView = glass
-
-        container.translatesAutoresizingMaskIntoConstraints = false
-        glass.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(container)
-
+        let content = addGlass(cornerRadius: 18)
         let stack = makeStack()
         content.addSubview(stack)
 
         NSLayoutConstraint.activate([
-            container.leadingAnchor.constraint(equalTo: leadingAnchor),
-            container.trailingAnchor.constraint(equalTo: trailingAnchor),
-            container.topAnchor.constraint(equalTo: topAnchor),
-            container.bottomAnchor.constraint(equalTo: bottomAnchor),
-            glass.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            glass.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            glass.topAnchor.constraint(equalTo: container.topAnchor),
-            glass.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-            content.leadingAnchor.constraint(equalTo: glass.leadingAnchor),
-            content.trailingAnchor.constraint(equalTo: glass.trailingAnchor),
-            content.topAnchor.constraint(equalTo: glass.topAnchor),
-            content.bottomAnchor.constraint(equalTo: glass.bottomAnchor),
             stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 10),
             stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -10),
             stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 8),
@@ -131,9 +130,12 @@ final class Rail: NSView, NSTextFieldDelegate {
         let addressRow = makeAddressRow()
 
         // The list is the part that shrinks and scrolls when the window is short.
-        tabList.translatesAutoresizingMaskIntoConstraints = false
-        tabList.setContentHuggingPriority(.init(1), for: .vertical)
-        tabList.setContentCompressionResistancePriority(.init(1), for: .vertical)
+        for list in [tabList, suggestions] {
+            list.translatesAutoresizingMaskIntoConstraints = false
+            list.setContentHuggingPriority(.init(1), for: .vertical)
+            list.setContentCompressionResistancePriority(.init(1), for: .vertical)
+        }
+        suggestions.isHidden = true
 
         let bottomSpacer = NSView()
         bottomSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -143,12 +145,13 @@ final class Rail: NSView, NSTextFieldDelegate {
         pinned.translatesAutoresizingMaskIntoConstraints = false
         pinned.isHidden = true
 
-        let stack = NSStackView(views: [topRow, addressRow, pinned, tabList, bottomRow])
+        let rows = [topRow, addressRow, pinned, tabList, suggestions, bottomRow]
+        let stack = NSStackView(views: rows)
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
-        for row in [topRow, addressRow, pinned, tabList, bottomRow] {
+        for row in rows {
             row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         return stack
@@ -196,6 +199,42 @@ final class Rail: NSView, NSTextFieldDelegate {
     @objc private func forwardPressed() { onNavigate?(.forward) }
     @objc private func reloadPressed() { onNavigate?(.reload) }
     @objc private func settingsPressed() { onSettings?() }
+}
+
+extension NSView {
+    /// Fills this view with a glass surface and returns the view that holds its content.
+    func addGlass(cornerRadius: CGFloat) -> NSView {
+        let glass = NSGlassEffectView()
+        glass.style = .regular
+        glass.cornerRadius = cornerRadius
+
+        let content = NSView()
+        content.translatesAutoresizingMaskIntoConstraints = false
+        glass.contentView = content
+
+        let container = NSGlassEffectContainerView()
+        container.contentView = glass
+
+        container.translatesAutoresizingMaskIntoConstraints = false
+        glass.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(container)
+
+        NSLayoutConstraint.activate([
+            container.leadingAnchor.constraint(equalTo: leadingAnchor),
+            container.trailingAnchor.constraint(equalTo: trailingAnchor),
+            container.topAnchor.constraint(equalTo: topAnchor),
+            container.bottomAnchor.constraint(equalTo: bottomAnchor),
+            glass.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            glass.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            glass.topAnchor.constraint(equalTo: container.topAnchor),
+            glass.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            content.leadingAnchor.constraint(equalTo: glass.leadingAnchor),
+            content.trailingAnchor.constraint(equalTo: glass.trailingAnchor),
+            content.topAnchor.constraint(equalTo: glass.topAnchor),
+            content.bottomAnchor.constraint(equalTo: glass.bottomAnchor),
+        ])
+        return content
+    }
 }
 
 private final class AddressField: NSTextField {

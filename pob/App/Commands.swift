@@ -18,7 +18,7 @@ struct Command {
     let perform: () -> Void
 }
 
-/// One list of every action. It feeds the menu bar now and the switcher in Stage 2.
+/// One list of every action. It feeds the menu bar and the switcher.
 struct CommandList {
     let all: [Command]
 

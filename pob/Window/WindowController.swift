@@ -5,9 +5,12 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
     let tabs: TabManager
     var tab: Tab? { tabs.activeTab }
     let rail = Rail()
+    let switcher = SwitcherView()
     let backdrop = BackdropView()
     private(set) var usesFallbackBlur = false
     private(set) var railState = RailState()
+    /// Replaceable because tests need history to answer late.
+    var searchHistory: (String) async -> [HistoryEntry]
 
     private let appearance: AppearanceModel
     private let contentView = NSView()
@@ -19,10 +22,13 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
     private var railLeading: NSLayoutConstraint?
     private var railCloseTask: Task<Void, Never>?
     private(set) var openPopover: NSPopover?
+    private var historySearch: Task<Void, Never>?
+    private lazy var commands = CommandList.standard { [weak self] in self?.perform($0) }
 
     init(appearance: AppearanceModel, tabs: TabManager) {
         self.appearance = appearance
         self.tabs = tabs
+        searchHistory = { [profile = tabs.profile] in await profile.history.search($0, limit: SwitcherModel.historySearchLimit) }
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
@@ -42,6 +48,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
         buildContent(in: window)
         connectRail()
         connectTabs()
+        connectSwitcher()
         setWindowButtonsVisible(false)
         appearance.addObserver { [weak self] in self?.applyAppearance() }
         tabs.profile.bookmarks.addObserver { [weak self] in self?.updateRailContents() }
@@ -66,6 +73,10 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
     }
 
     func perform(_ id: CommandID) {
+        // Commands act on the window, and several of them move the keyboard, so the panel can't stay up over them.
+        if id != .openSwitcher, id != .openSwitcherFromPage {
+            closeSwitcher()
+        }
         switch id {
         case .back: tab?.webView.goBack()
         case .forward: tab?.webView.goForward()
@@ -91,9 +102,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
         case .selectTab8: tabs.activate(index: 7)
         case .selectTab9: tabs.activate(index: 8)
         case .openSwitcher, .openSwitcherFromPage:
-            // shortcut: a blank tab stands in for the switcher, replace this when the switcher exists
-            tabs.newTab(nil, activate: true)
-            perform(.focusAddress)
+            openSwitcher()
         case .newWindow:
             break // shortcut: there's one window for now, open another here when AppController manages several
         case .toggleRail:
@@ -202,6 +211,11 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
         edgeStrip.frame = NSRect(x: 0, y: 0, width: EdgeStrip.width, height: contentView.bounds.height)
         edgeStrip.autoresizingMask = [.height]
         contentView.addSubview(edgeStrip)
+
+        switcher.frame = contentView.bounds
+        switcher.autoresizingMask = [.width, .height]
+        switcher.isHidden = true
+        contentView.addSubview(switcher)
     }
 
     private func connectRail() {
@@ -220,32 +234,112 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
             railState.beginEditingAddress()
             applyRailState()
         }
+        rail.onAddressChange = { [weak self] text in
+            self?.suggest(text) { rows in
+                // Blank text matches every open tab, and the tab list already shows those.
+                self?.rail.showSuggestions(AddressInput.classify(text) == nil ? [] : rows)
+            }
+        }
         rail.onAddressEndEditing = { [weak self] in
             guard let self else { return }
+            historySearch?.cancel()
+            rail.showSuggestions([])
             railState.endEditingAddress(pointerInsideRail: isPointerOverRail)
             applyRailState()
         }
         rail.onSubmit = { [weak self] text in
             guard let self else { return }
             if let input = AddressInput.classify(text) {
-                tab?.load(input)
+                navigate(input)
             }
-            window?.makeFirstResponder(tab?.webView)
+            leaveAddressField()
         }
-        rail.onCancel = { [weak self] in
-            guard let self else { return }
-            updateRailContents()
-            window?.makeFirstResponder(tab?.webView)
+        rail.onCancel = { [weak self] in self?.leaveAddressField() }
+        rail.suggestions.onChoose = { [weak self] in self?.chooseSuggestion($0) }
+    }
+
+    /// The rail leaves a field being edited alone, so the address can only come back once the keyboard has moved.
+    private func leaveAddressField() {
+        window?.makeFirstResponder(tab?.webView)
+        updateRailContents()
+    }
+
+    /// Loads in the current tab, or in a new one when the window has none.
+    private func navigate(_ input: AddressInput) {
+        if let tab {
+            tab.load(input)
+        } else {
+            tabs.newTab(input, activate: true)
+        }
+    }
+
+    private func chooseSuggestion(_ row: SwitcherRow) {
+        leaveAddressField()
+        switch row.target {
+        case .tab(let id):
+            if let url = tabs.list.records.first(where: { $0.id == id })?.url {
+                navigate(.url(url))
+            }
+        case .url(let url): navigate(.url(url))
+        case .address(let input): navigate(input)
+        case .command(let id): commands.command(id)?.perform()
         }
     }
 
     /// A bookmark opens in the current tab, or in a new one when the window has none.
     func openBookmark(_ bookmark: Bookmark) {
-        if let tab {
-            tab.load(.url(bookmark.url))
-        } else {
-            tabs.newTab(.url(bookmark.url), activate: true)
+        navigate(.url(bookmark.url))
+    }
+
+    private func connectSwitcher() {
+        switcher.onChoose = { [weak self] in self?.chooseInSwitcher($0) }
+        switcher.onCancel = { [weak self] in self?.closeSwitcher() }
+        switcher.onQueryChange = { [weak self] in self?.searchInSwitcher($0) }
+    }
+
+    private func openSwitcher() {
+        guard switcher.isHidden else {
+            switcher.focus()
+            return
         }
+        switcher.open()
+        searchInSwitcher("")
+    }
+
+    private func closeSwitcher() {
+        guard !switcher.isHidden else { return }
+        window?.makeFirstResponder(tab?.webView)
+        switcher.isHidden = true
+    }
+
+    private func chooseInSwitcher(_ row: SwitcherRow) {
+        closeSwitcher()
+        switch row.target {
+        case .tab(let id): tabs.activate(id)
+        case .url(let url): tabs.newTab(.url(url), activate: true)
+        case .address(let input): tabs.newTab(input, activate: true)
+        case .command(let id): commands.command(id)?.perform()
+        }
+    }
+
+    private func searchInSwitcher(_ query: String) {
+        suggest(query) { [weak self] in self?.switcher.show(rows: $0) }
+    }
+
+    /// Everything but history shows at once, and history joins it when it answers.
+    /// Each search cancels the one before, so a late answer for old text is dropped.
+    private func suggest(_ query: String, show: @escaping ([SwitcherRow]) -> Void) {
+        historySearch?.cancel()
+        show(rows(for: query, history: []))
+        historySearch = Task { [weak self, searchHistory] in
+            let history = await searchHistory(query)
+            guard !Task.isCancelled, !history.isEmpty, let self else { return }
+            show(rows(for: query, history: history))
+        }
+    }
+
+    private func rows(for query: String, history: [HistoryEntry]) -> [SwitcherRow] {
+        SwitcherModel.rows(query: query, tabs: tabs.list.records, bookmarks: tabs.profile.bookmarks.all, history: history, commands: commands.all)
     }
 
     private func connectTabs() {
@@ -279,7 +373,9 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
             tab.pageView.alphaValue = 1
             tab.pageView.frame = contentView.bounds
             contentView.addSubview(tab.pageView, positioned: .below, relativeTo: topStrip)
-            window?.makeFirstResponder(tab.webView)
+            if switcher.isHidden { // a page coming forward behind the panel mustn't catch what's being typed
+                window?.makeFirstResponder(tab.webView)
+            }
         }
         applyPageStyle()
         updateRailContents()

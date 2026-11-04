@@ -276,14 +276,6 @@ import WebKit
         #expect(tabs.list.records.count == 10)
         #expect(tabs.list.activeID == ids[1])
     }
-    @Test(arguments: [CommandID.openSwitcher, .openSwitcherFromPage])
-    func untilTheSwitcherExistsItOpensABlankTabToTypeIn(command: CommandID) {
-        let (controller, _) = make()
-        controller.perform(command)
-        #expect(controller.tabs.list.records.count == 2)
-        #expect(controller.tab?.webView.url == nil)
-        #expect(controller.railState.isEditingAddress)
-    }
     @Test func newWindowDoesNothingYet() {
         let (controller, _) = make()
         controller.perform(.newWindow)
@@ -292,7 +284,7 @@ import WebKit
     @Test func commandsAreSafeWithNoTabs() {
         let tabs = emptyTabs()
         let (controller, _) = make(tabs)
-        for command in CommandID.allCases where command != .openSwitcher && command != .openSwitcherFromPage {
+        for command in CommandID.allCases {
             controller.perform(command)
         }
         #expect(tabs.isEmpty)
