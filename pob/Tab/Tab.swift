@@ -14,7 +14,14 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
     var onCreatePopup: ((WKWebViewConfiguration) -> WKWebView?)?
     var onCloseRequested: (() -> Void)?
 
+    /// True from the moment an error or crash page loads until the next real page commits, so history and favicons skip it.
+    private(set) var isShowingErrorPage = false
+
     private var observations: [NSKeyValueObservation] = []
+    private var errorNavigation: WKNavigation?
+    private var crashRecovery = CrashRecovery()
+    /// Replaceable because tests can't wait ten seconds.
+    var now: () -> Date = { .now }
 
     /// A popup passes the configuration WebKit gave it, which keeps its link to the opener.
     init(profile: Profile, configuration: WKWebViewConfiguration? = nil) {
@@ -104,6 +111,130 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         // Only the blank page shows the desktop. Pages with no background of their own get a normal one.
         PrivateAPI.setDrawsBackground(webView, webView.url?.scheme != "about")
+        isShowingErrorPage = navigation != nil && navigation === errorNavigation
+    }
+
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        showErrorPage(for: error)
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        showErrorPage(for: error)
+    }
+
+    private func showErrorPage(for error: Error) {
+        guard ErrorPage.shouldShow(error),
+              let url = (error as NSError).userInfo[NSURLErrorFailingURLErrorKey] as? URL else { return }
+        show(ErrorPage.html(for: url, error: error), at: url)
+    }
+
+    private func show(_ html: String, at url: URL?) {
+        if let url {
+            errorNavigation = webView.loadSimulatedRequest(URLRequest(url: url), responseHTML: html)
+        } else {
+            errorNavigation = webView.loadHTMLString(html, baseURL: nil)
+        }
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        if crashRecovery.shouldReload(at: now()) {
+            webView.reload()
+        } else {
+            show(ErrorPage.crashHTML(for: webView.url), at: webView.url)
+        }
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping @MainActor (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        let space = challenge.protectionSpace
+        guard space.authenticationMethod == NSURLAuthenticationMethodServerTrust, let trust = space.serverTrust else {
+            answer(challenge, trustIsValid: true, completionHandler)
+            return
+        }
+        // Evaluation can reach the network, so it stays off the main thread.
+        SecTrustEvaluateAsyncWithError(trust, DispatchQueue.global()) { _, valid, _ in
+            Task { @MainActor in self.answer(challenge, trustIsValid: valid, completionHandler) }
+        }
+    }
+
+    /// Calls `completion` exactly once on every path.
+    private func answer(
+        _ challenge: URLAuthenticationChallenge,
+        trustIsValid: Bool,
+        _ completion: @escaping @MainActor (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        let space = challenge.protectionSpace
+        let allowed = profile.siteSettings[space.host].allowsInvalidCertificate == true
+        switch SignInChallenge.action(method: space.authenticationMethod, hostIsAllowed: allowed, trustIsValid: trustIsValid) {
+        case .useDefault:
+            completion(.performDefaultHandling, nil)
+        case .trust:
+            if let trust = space.serverTrust {
+                completion(.useCredential, URLCredential(trust: trust))
+            } else {
+                completion(.performDefaultHandling, nil)
+            }
+        case .askForPassword:
+            askForPassword(challenge, completion)
+        case .askAboutCertificate:
+            askAboutCertificate(challenge, completion)
+        }
+    }
+
+    private func askForPassword(
+        _ challenge: URLAuthenticationChallenge,
+        _ completion: @escaping @MainActor (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        let space = challenge.protectionSpace
+        let user = NSTextField(frame: NSRect(x: 0, y: 28, width: 260, height: 22))
+        user.placeholderString = "Username"
+        let password = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 22))
+        password.placeholderString = "Password"
+        let fields = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 50))
+        fields.addSubview(user)
+        fields.addSubview(password)
+
+        let alert = NSAlert()
+        alert.messageText = "Sign in to \(space.host)"
+        // The realm is the server's own text, so it's quoted and cut short.
+        let realm = space.realm.map { "The site says: \"\($0.prefix(100))\"" } ?? ""
+        let retry = challenge.previousFailureCount > 0 ? "That didn't work. Try again.\n" : ""
+        alert.informativeText = retry + realm
+        alert.accessoryView = fields
+        alert.addButton(withTitle: "Sign In")
+        alert.addButton(withTitle: "Cancel")
+        alert.present(in: webView.window) { response in
+            if response == .alertFirstButtonReturn {
+                completion(.useCredential, URLCredential(user: user.stringValue, password: password.stringValue, persistence: .forSession))
+            } else {
+                completion(.cancelAuthenticationChallenge, nil)
+            }
+        }
+    }
+
+    private func askAboutCertificate(
+        _ challenge: URLAuthenticationChallenge,
+        _ completion: @escaping @MainActor (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        let space = challenge.protectionSpace
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "The certificate for \(space.host) isn't valid"
+        alert.informativeText = "pob can't confirm this is the real site. Allow it only if you trust it, for example on a local development server."
+        alert.addButton(withTitle: "Go Back")
+        alert.addButton(withTitle: "Allow This Site")
+        alert.present(in: webView.window) { [weak self] response in
+            guard response == .alertSecondButtonReturn, let self, let trust = space.serverTrust else {
+                completion(.cancelAuthenticationChallenge, nil)
+                if self?.webView.canGoBack == true { self?.webView.goBack() }
+                return
+            }
+            profile.siteSettings[space.host].allowsInvalidCertificate = true
+            completion(.useCredential, URLCredential(trust: trust))
+        }
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

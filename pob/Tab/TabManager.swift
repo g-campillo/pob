@@ -118,8 +118,10 @@ final class TabManager {
         tab.onLoadFinished = { [weak self, weak tab] in
             if let tab {
                 self?.list.update(id) { $0.interactionState = nil } // the page is back, so its own state counts from here
-                self?.recordVisit(of: tab)
-                self?.refreshFavicon(of: tab)
+                if !tab.isShowingErrorPage { // a typo would otherwise become a suggestion
+                    self?.recordVisit(of: tab)
+                    self?.refreshFavicon(of: tab)
+                }
                 self?.onLoadFinished?(tab)
             }
         }
@@ -210,7 +212,9 @@ final class TabManager {
     private func capture(_ tab: Tab, in record: inout TabRecord) {
         record.url = tab.webView.url ?? record.url
         record.title = tab.title.isEmpty ? record.title : tab.title
-        if record.interactionState == nil || !tab.webView.isLoading {
+        if tab.isShowingErrorPage {
+            record.interactionState = nil // the address stays, so a restore tries the real page again
+        } else if record.interactionState == nil || !tab.webView.isLoading {
             record.interactionState = tab.webView.interactionState as? Data ?? record.interactionState
         }
     }
