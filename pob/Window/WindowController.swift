@@ -7,6 +7,8 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
     let rail = Rail()
     let switcher = SwitcherView()
     let backdrop = BackdropView()
+    let pill = DomainPill()
+    let loadingLine = LoadingLine()
     private(set) var usesFallbackBlur = false
     private(set) var railState = RailState()
     /// Replaceable because tests need history to answer late.
@@ -152,6 +154,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
         setWindowButtonsVisible(isVisible)
         applyPageStyle()
         switcher.pageInset = isVisible ? Rail.footprint : 0
+        pill.isSuppressed = isVisible
 
         if isVisible {
             rail.isHidden = false
@@ -196,6 +199,23 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
         )
         topStrip.autoresizingMask = [.width, .minYMargin]
         contentView.addSubview(topStrip)
+
+        loadingLine.frame = NSRect(
+            x: 0,
+            y: contentView.bounds.height - LoadingLine.height,
+            width: contentView.bounds.width,
+            height: LoadingLine.height
+        )
+        loadingLine.autoresizingMask = [.width, .minYMargin]
+        contentView.addSubview(loadingLine)
+
+        pill.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(pill)
+        NSLayoutConstraint.activate([
+            pill.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
+            pill.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12),
+            pill.widthAnchor.constraint(lessThanOrEqualTo: contentView.widthAnchor, multiplier: 0.6),
+        ])
 
         rail.translatesAutoresizingMaskIntoConstraints = false
         rail.isHidden = true
@@ -359,6 +379,11 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
         rail.tabList.onMove = { [weak self] in self?.tabs.move(from: $0, to: $1) }
         rail.tabList.onNewTab = { [weak self] in self?.perform(.openSwitcher) }
         tabs.onChange = { [weak self] in self?.updateRailContents() }
+        tabs.onLoadFinished = { [weak self] finished in
+            guard let self, finished === tab else { return }
+            pill.show(url: finished.webView.url)
+        }
+        tabs.onActiveProgress = { [weak self] in self?.loadingLine.update(progress: $0, isLoading: $1) }
         tabs.onActiveChange = { [weak self] in
             guard let self else { return }
             showActiveTab()
@@ -385,6 +410,8 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
         }
         applyPageStyle()
         updateRailContents()
+        pill.show(url: tab?.webView.url)
+        loadingLine.update(progress: tab?.webView.estimatedProgress ?? 0, isLoading: tab?.webView.isLoading ?? false)
     }
 
     private func applyPageStyle() {

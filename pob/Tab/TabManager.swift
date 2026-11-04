@@ -8,6 +8,8 @@ final class TabManager {
     var onChange: (() -> Void)?
     var onActiveChange: (() -> Void)?
     var onLoadFinished: ((Tab) -> Void)?
+    /// Only the active tab's loading, so a background page never shows.
+    var onActiveProgress: ((Double, Bool) -> Void)?
     /// Replaceable because tests can't start a real capture.
     var isCapturing: (Tab) -> Bool = { $0.isCapturing }
 
@@ -104,6 +106,10 @@ final class TabManager {
                 self?.refreshFavicon(of: tab)
                 self?.onLoadFinished?(tab)
             }
+        }
+        tab.onProgress = { [weak self] progress, isLoading in
+            guard let self, id == list.activeID else { return }
+            onActiveProgress?(progress, isLoading)
         }
         tab.onOpenLink = { [weak self] request, activate in
             self?.newTab(nil, activate: activate).webView.load(request)

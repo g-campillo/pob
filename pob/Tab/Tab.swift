@@ -9,6 +9,7 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
     var title: String { webView.title ?? "" }
     var onLoadFinished: (() -> Void)?
     var onStateChange: (() -> Void)?
+    var onProgress: ((Double, Bool) -> Void)?
     var onOpenLink: ((URLRequest, _ activate: Bool) -> Void)?
     var onCreatePopup: ((WKWebViewConfiguration) -> WKWebView?)?
     var onCloseRequested: (() -> Void)?
@@ -71,12 +72,18 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
             webView.observe(\.title) { [weak self] _, _ in self?.stateChanged() },
             webView.observe(\.canGoBack) { [weak self] _, _ in self?.stateChanged() },
             webView.observe(\.canGoForward) { [weak self] _, _ in self?.stateChanged() },
+            webView.observe(\.estimatedProgress) { [weak self] _, _ in self?.progressChanged() },
+            webView.observe(\.isLoading) { [weak self] _, _ in self?.progressChanged() },
         ]
     }
 
     // WebKit reports these properties on the main thread.
     private nonisolated func stateChanged() {
         MainActor.assumeIsolated { onStateChange?() }
+    }
+
+    private nonisolated func progressChanged() {
+        MainActor.assumeIsolated { onProgress?(webView.estimatedProgress, webView.isLoading) }
     }
 
     // MARK: WKNavigationDelegate
