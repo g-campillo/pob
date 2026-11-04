@@ -5,15 +5,6 @@ import WebKit
 @testable import pob
 
 @Suite struct LoginFillerTests {
-    func tabWith(html: String) async -> Tab {
-        let tab = Tab(profile: .initial)
-        await withCheckedContinuation { continuation in
-            tab.onLoadFinished = { tab.onLoadFinished = nil; continuation.resume() }
-            tab.webView.loadHTMLString(html, baseURL: URL(string: "https://localhost/"))
-        }
-        return tab
-    }
-
     @Test func fillsPasswordsWithSpecialCharacters() async throws {
         let tab = await tabWith(html: "<form><input id=u type=email><input id=p type=password></form>")
         let password = "q\"'\\<>é"

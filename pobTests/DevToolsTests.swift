@@ -4,7 +4,7 @@ import Testing
 
 @Suite struct DevToolsTests {
     @Test func blankPagesDontOpenInSafari() async {
-        let tab = Tab(profile: .initial)
+        let tab = Tab(profile: .temporary())
         await withCheckedContinuation { continuation in
             tab.onLoadFinished = { tab.onLoadFinished = nil; continuation.resume() }
             tab.load(.url(URL(string: "about:blank")!))
@@ -12,7 +12,7 @@ import Testing
         #expect(tab.safariURL == nil)
     }
     @Test func realPagesOpenInSafari() async {
-        let tab = Tab(profile: .initial)
+        let tab = Tab(profile: .temporary())
         await withCheckedContinuation { continuation in
             tab.onLoadFinished = { tab.onLoadFinished = nil; continuation.resume() }
             tab.webView.loadHTMLString("<p>x</p>", baseURL: URL(string: "https://localhost/page"))

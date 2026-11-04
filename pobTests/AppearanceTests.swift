@@ -47,7 +47,7 @@ import Testing
     @Test func reduceTransparencyForcesOpaqueWhileRunning() {
         let model = AppearanceModel(store: SettingsStore(fileURL: tempFile()), reduceTransparency: false)
         var changes = 0
-        model.onChange = { changes += 1 }
+        model.addObserver { changes += 1 }
         model.reduceTransparency = true
         #expect(model.effective == EffectiveAppearance(pageAlpha: 1, blurRadius: 0))
         model.reduceTransparency = false

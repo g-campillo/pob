@@ -52,7 +52,7 @@ import Testing
     @Test func pinningMovesThePageOverAndHoverDoesNot() {
         let url = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString + ".json")
         let model = AppearanceModel(store: SettingsStore(fileURL: url), reduceTransparency: false)
-        let controller = WindowController(appearance: model, tab: Tab(profile: .initial))
+        let controller = WindowController(appearance: model, tab: Tab(profile: .temporary()))
         controller.perform(.toggleRail)
         #expect(controller.tab.webView.obscuredContentInsets.left == 256)
         #expect(controller.window?.standardWindowButton(.closeButton)?.isHidden == false)
@@ -63,7 +63,7 @@ import Testing
     @Test func revealingImmediatelyPutsTheRailInPlaceForPopovers() {
         let url = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString + ".json")
         let model = AppearanceModel(store: SettingsStore(fileURL: url), reduceTransparency: false)
-        let controller = WindowController(appearance: model, tab: Tab(profile: .initial))
+        let controller = WindowController(appearance: model, tab: Tab(profile: .temporary()))
         controller.revealRailImmediately()
         #expect(controller.rail.isHidden == false)
         #expect(controller.rail.frame.minX == Rail.inset)

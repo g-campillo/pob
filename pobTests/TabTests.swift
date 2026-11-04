@@ -4,15 +4,6 @@ import WebKit
 @testable import pob
 
 @Suite struct TabTests {
-    func tabWith(html: String) async -> Tab {
-        let tab = Tab(profile: .initial)
-        await withCheckedContinuation { continuation in
-            tab.onLoadFinished = { tab.onLoadFinished = nil; continuation.resume() }
-            tab.webView.loadHTMLString(html, baseURL: URL(string: "https://localhost/"))
-        }
-        return tab
-    }
-
     @Test func userAgentUsesInstalledSafariVersion() throws {
         let plist = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString + ".plist")
         try (["CFBundleShortVersionString": "27.1"] as NSDictionary).write(to: plist)

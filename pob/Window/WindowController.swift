@@ -39,7 +39,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
         buildContent(in: window)
         connectRail()
         setWindowButtonsVisible(false)
-        appearance.onChange = { [weak self] in self?.applyAppearance() }
+        appearance.addObserver { [weak self] in self?.applyAppearance() }
         applyAppearance()
     }
 
@@ -239,9 +239,10 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
 
     private func openInSafari() {
         guard let url = tab.safariURL else { return }
+        guard let safari = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Safari") else { return }
         NSWorkspace.shared.open(
             [url],
-            withApplicationAt: URL(fileURLWithPath: "/Applications/Safari.app"),
+            withApplicationAt: safari,
             configuration: NSWorkspace.OpenConfiguration()
         )
     }

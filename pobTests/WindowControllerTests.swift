@@ -7,7 +7,7 @@ import Testing
     func make() -> (WindowController, AppearanceModel) {
         let url = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString + ".json")
         let model = AppearanceModel(store: SettingsStore(fileURL: url), reduceTransparency: false)
-        return (WindowController(appearance: model, tab: Tab(profile: .initial)), model)
+        return (WindowController(appearance: model, tab: Tab(profile: .temporary())), model)
     }
 
     @Test func windowIsClearAndChromeless() throws {

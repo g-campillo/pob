@@ -1,18 +1,27 @@
 import Foundation
 
 final class AppearanceModel {
-    var onChange: (() -> Void)?
+    // shortcut: a closed window leaves a no-op closure behind, add removal if that ever matters
+    private var observers: [() -> Void] = []
+
+    func addObserver(_ observer: @escaping () -> Void) {
+        observers.append(observer)
+    }
+
+    private func notify() {
+        observers.forEach { $0() }
+    }
 
     var settings: AppearanceSettings {
         get { storedSettings }
         set {
             storedSettings = newValue.clamped
-            onChange?()
+            notify()
         }
     }
 
     var reduceTransparency: Bool {
-        didSet { onChange?() }
+        didSet { notify() }
     }
 
     private(set) var isSnappedOpaque = false
@@ -35,7 +44,7 @@ final class AppearanceModel {
 
     func toggleSnap() {
         isSnappedOpaque.toggle()
-        onChange?()
+        notify()
     }
 
     func persist() throws {

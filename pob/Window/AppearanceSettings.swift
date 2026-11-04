@@ -26,18 +26,13 @@ struct SettingsStore {
 
     let fileURL: URL
 
+    private var file: JSONFile<AppearanceSettings> { JSONFile(url: fileURL) }
+
     func load() -> AppearanceSettings {
-        guard let data = try? Data(contentsOf: fileURL),
-              let settings = try? JSONDecoder().decode(AppearanceSettings.self, from: data)
-        else { return .standard }
-        return settings.clamped
+        file.load()?.clamped ?? .standard
     }
 
     func save(_ settings: AppearanceSettings) throws {
-        try FileManager.default.createDirectory(
-            at: fileURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try JSONEncoder().encode(settings).write(to: fileURL, options: .atomic)
+        try file.save(settings)
     }
 }

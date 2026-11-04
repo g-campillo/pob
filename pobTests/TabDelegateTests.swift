@@ -16,6 +16,6 @@ import Testing
         "webView:didFinishNavigation:",
     ])
     func webKitCanReachDelegateMethod(selector: String) {
-        #expect(Tab(profile: .initial).responds(to: NSSelectorFromString(selector)))
+        #expect(Tab(profile: .temporary()).responds(to: NSSelectorFromString(selector)))
     }
 }
