@@ -19,7 +19,7 @@ Run by the user on 2026-11-04 on macOS 27.0.1, with an Apple M5 Pro.
 
 ## Decisions
 
-- **Passwords:** native AutoFill doesn't work, so the Passwords menu bar item stays the way to sign in until the user decides whether they want a one-way import into pob's own Keychain store.
+- **Passwords:** native AutoFill doesn't work, so the user chose to copy and paste from the Passwords menu bar item. There's no import, and pob stores no passwords. iCloud passkeys stay unavailable, so sites need a password or another sign-in method.
 - **Screen sharing:** this remains the biggest open risk. Stage 2 goes ahead without it. If it fails later, the fallback is Open in Safari, and the engine decision goes back to the user only if that isn't acceptable.
 
 ## Found during testing
