@@ -1,0 +1,48 @@
+name: pob
+options:
+  bundleIdPrefix: com.gcampillo
+  deploymentTarget:
+    macOS: "27.0"
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+    SWIFT_APPROACHABLE_CONCURRENCY: YES
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "Apple Development: GABRIEL CAMPILLO (ZV8JBS785H)"
+    DEVELOPMENT_TEAM: UR28366SA6
+targets:
+  pob:
+    type: application
+    platform: macOS
+    sources:
+      - path: pob
+        type: syncedFolder
+    settings:
+      base:
+        ENABLE_HARDENED_RUNTIME: YES
+        INFOPLIST_FILE: Config/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Config/pob.entitlements
+        PRODUCT_BUNDLE_IDENTIFIER: com.gcampillo.pob
+  pobTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: pobTests
+        type: syncedFolder
+    dependencies:
+      - target: pob
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  pob:
+    build:
+      targets:
+        pob: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - pobTests
