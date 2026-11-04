@@ -10,6 +10,9 @@ final class Profile {
 
     lazy var siteSettings = SiteSettings(file: JSONFile(url: directory.appending(path: "sites.json")))
 
+    /// Built ahead of time, so a new tab doesn't wait for a web view.
+    private(set) var spareTab: Tab?
+
     static let initial = Profile(
         id: UUID(uuidString: "6F0B5C2E-2F4B-4C6E-9B52-1F6B0A5D7C11")!,
         directory: URL.applicationSupportDirectory.appending(path: "pob/profiles/6F0B5C2E-2F4B-4C6E-9B52-1F6B0A5D7C11", directoryHint: .isDirectory),
@@ -31,5 +34,16 @@ final class Profile {
         self.directory = directory
         self.isPersistent = isPersistent
         dataStore = isPersistent ? WKWebsiteDataStore(forIdentifier: id) : .nonPersistent()
+    }
+
+    func prepareSpareTab() {
+        if spareTab == nil {
+            spareTab = Tab(profile: self)
+        }
+    }
+
+    func takeSpareTab() -> Tab {
+        defer { spareTab = nil }
+        return spareTab ?? Tab(profile: self)
     }
 }

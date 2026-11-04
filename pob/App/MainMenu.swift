@@ -6,9 +6,16 @@ enum MainMenu {
         addSubmenu("pob", to: menu, items: [
             NSMenuItem(title: "Quit pob", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"),
         ])
+        addSubmenu("File", to: menu, items: items(
+            for: [.openSwitcher, .newWindow, .reopenTab, .closeTab, .closeWindow],
+            in: commands
+        ))
         addSubmenu("Edit", to: menu, items: editItems())
         addSubmenu("View", to: menu, items: items(for: [.toggleRail, .snapOpaque], in: commands))
-        addSubmenu("Go", to: menu, items: items(for: [.back, .forward, .reload, .focusAddress], in: commands))
+        addSubmenu("Go", to: menu, items: items(
+            for: [.back, .forward, .reload, .focusAddress, .openSwitcherFromPage],
+            in: commands
+        ))
         addSubmenu("Develop", to: menu, items: items(
             for: [.toggleInspector, .showConsole, .showPageSource, .openInSafari, .signIn],
             in: commands
@@ -16,7 +23,7 @@ enum MainMenu {
         addSubmenu("Window", to: menu, items: [
             NSMenuItem(title: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m"),
             NSMenuItem(title: "Zoom", action: #selector(NSWindow.performZoom(_:)), keyEquivalent: ""),
-        ] + items(for: [.closeWindow], in: commands))
+        ])
         return menu
     }
 

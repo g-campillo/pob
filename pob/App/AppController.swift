@@ -11,6 +11,13 @@ final class AppController: NSObject, NSApplicationDelegate {
     private var commands: CommandList?
     private var keyMonitor: Any?
     private var displayOptionsObserver: NSObjectProtocol?
+    private var phaseTimer: Timer?
+    private var memoryPressureSource: (any DispatchSourceMemoryPressure)?
+
+    /// A sheet or a detached inspector in front keeps its keys.
+    private var isBrowserWindowKey: Bool {
+        NSApp.keyWindow === windowController?.window
+    }
 
     static func main() {
         let application = NSApplication.shared
@@ -29,17 +36,21 @@ final class AppController: NSObject, NSApplicationDelegate {
         self.appearance = appearance
         observeDisplayOptions(appearance)
 
-        let tab = Tab(profile: .initial)
-        let windowController = WindowController(appearance: appearance, tab: tab)
+        let tabs = TabManager(profile: .initial)
+        tabs.newTab(.url(URL(string: "about:blank")!), activate: true)
+        let windowController = WindowController(appearance: appearance, tabs: tabs)
         self.windowController = windowController
-        tab.load(.url(URL(string: "about:blank")!))
 
-        let commands = CommandList.standard { [weak self] in self?.windowController?.perform($0) }
+        let commands = CommandList.standard { [weak self] id in
+            guard let self, isBrowserWindowKey else { return }
+            self.windowController?.perform(id)
+        }
         self.commands = commands
         let menu = MainMenu.build(commands: commands)
         NSApp.mainMenu = menu
         NSApp.windowsMenu = menu.item(withTitle: "Window")?.submenu
         installReservedShortcuts()
+        watchTabPhases()
 
         windowController.showWindow(nil)
         NSApp.activate()
@@ -65,12 +76,26 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// Reserved shortcuts run here, before WebKit offers the key to the page.
     private func installReservedShortcuts() {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            let modifiers = event.modifierFlags.intersection([.command, .option, .shift, .control])
-            guard let key = event.charactersIgnoringModifiers?.lowercased(),
-                  let command = self?.commands?.reservedCommand(key: key, modifiers: modifiers)
-            else { return event }
+            guard let self, isBrowserWindowKey, let command = commands?.reservedCommand(for: event) else { return event }
             command.perform()
             return nil
         }
+    }
+
+    /// Both handlers run on the main thread: the timer on the run loop it was scheduled from, the source on `.main`.
+    private func watchTabPhases() {
+        phaseTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updateTabPhases(memoryPressure: false) }
+        }
+        let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
+        source.setEventHandler { [weak self] in
+            MainActor.assumeIsolated { self?.updateTabPhases(memoryPressure: true) }
+        }
+        source.activate()
+        memoryPressureSource = source
+    }
+
+    private func updateTabPhases(memoryPressure: Bool) {
+        windowController?.tabs.updatePhases(now: .now, memoryPressure: memoryPressure)
     }
 }

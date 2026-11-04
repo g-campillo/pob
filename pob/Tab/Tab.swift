@@ -1,37 +1,54 @@
 import AppKit
 import WebKit
 
-enum PopupPolicy {
-    case sameTab
-    case popupWindow
-}
-
 final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
+    let profile: Profile
     let webView: WKWebView
+    /// WebKit docks the inspector beside the page, so the two share this view to leave the window together.
+    let pageView = NSView()
     var onLoadFinished: (() -> Void)?
     var onStateChange: (() -> Void)?
+    var onOpenLink: ((URLRequest, _ activate: Bool) -> Void)?
+    var onCreatePopup: ((WKWebViewConfiguration) -> WKWebView?)?
+    var onCloseRequested: (() -> Void)?
 
     private var observations: [NSKeyValueObservation] = []
 
-    init(profile: Profile) {
-        let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = profile.dataStore
-        configuration.applicationNameForUserAgent = UserAgent.applicationName()
-        configuration.preferences.isElementFullscreenEnabled = true
-        PrivateAPI.enableDeveloperExtras(configuration)
-
-        webView = WKWebView(frame: .zero, configuration: configuration)
+    /// A popup passes the configuration WebKit gave it, which keeps its link to the opener.
+    init(profile: Profile, configuration: WKWebViewConfiguration? = nil) {
+        self.profile = profile
+        webView = WKWebView(frame: .zero, configuration: configuration ?? Self.standardConfiguration(for: profile))
         webView.isInspectable = true
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsMagnification = true
         webView.underPageBackgroundColor = .clear
+        webView.autoresizingMask = [.width, .height]
         PrivateAPI.setDrawsBackground(webView, false)
+        pageView.autoresizingMask = [.width, .height]
+        pageView.addSubview(webView)
 
         super.init()
 
         webView.navigationDelegate = self
         webView.uiDelegate = self
         observeState()
+    }
+
+    private static func standardConfiguration(for profile: Profile) -> WKWebViewConfiguration {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = profile.dataStore
+        configuration.applicationNameForUserAgent = UserAgent.applicationName()
+        configuration.preferences.isElementFullscreenEnabled = true
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+        PrivateAPI.enableDeveloperExtras(configuration)
+        return configuration
+    }
+
+    /// Muted capture counts, because the call is still going.
+    var isCapturing: Bool {
+        webView.cameraCaptureState != .none
+            || webView.microphoneCaptureState != .none
+            || PrivateAPI.isCapturingDisplay(webView)
     }
 
     /// The page to hand to Safari, or nil when there's nothing worth opening.
@@ -45,10 +62,6 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
         case .url(let url), .search(let url):
             webView.load(URLRequest(url: url))
         }
-    }
-
-    static func popupPolicy(for navigationType: WKNavigationType) -> PopupPolicy {
-        navigationType == .linkActivated ? .sameTab : .popupWindow
     }
 
     private func observeState() {
@@ -65,6 +78,19 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     // MARK: WKNavigationDelegate
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
+    ) {
+        if navigationAction.navigationType == .linkActivated, navigationAction.modifierFlags.contains(.command) {
+            onOpenLink?(navigationAction.request, false)
+            decisionHandler(.cancel)
+        } else {
+            decisionHandler(navigationAction.shouldPerformDownload ? .download : .allow)
+        }
+    }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         // Only the blank page shows the desktop. Pages with no background of their own get a normal one.
@@ -83,17 +109,15 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
         for navigationAction: WKNavigationAction,
         windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
-        switch Self.popupPolicy(for: navigationAction.navigationType) {
-        case .sameTab:
-            webView.load(navigationAction.request)
+        if navigationAction.modifierFlags.contains(.command) {
+            onOpenLink?(navigationAction.request, false)
             return nil
-        case .popupWindow:
-            return PopupWindow.open(configuration: configuration, features: windowFeatures, uiDelegate: self)
         }
+        return onCreatePopup?(configuration)
     }
 
     func webViewDidClose(_ webView: WKWebView) {
-        PopupWindow.close(showing: webView)
+        onCloseRequested?()
     }
 
     func webView(

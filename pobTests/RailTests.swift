@@ -52,18 +52,20 @@ import Testing
     @Test func pinningMovesThePageOverAndHoverDoesNot() {
         let url = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString + ".json")
         let model = AppearanceModel(store: SettingsStore(fileURL: url), reduceTransparency: false)
-        let controller = WindowController(appearance: model, tab: Tab(profile: .temporary()))
+        let tabs = TabManager(profile: .temporary(), keepsSpare: false)
+        tabs.newTab(nil, activate: true)
+        let controller = WindowController(appearance: model, tabs: tabs)
         controller.perform(.toggleRail)
-        #expect(controller.tab.webView.obscuredContentInsets.left == 256)
+        #expect(controller.tab?.webView.obscuredContentInsets.left == 256)
         #expect(controller.window?.standardWindowButton(.closeButton)?.isHidden == false)
         controller.perform(.toggleRail)
-        #expect(controller.tab.webView.obscuredContentInsets.left == 0)
+        #expect(controller.tab?.webView.obscuredContentInsets.left == 0)
     }
 
     @Test func revealingImmediatelyPutsTheRailInPlaceForPopovers() {
         let url = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString + ".json")
         let model = AppearanceModel(store: SettingsStore(fileURL: url), reduceTransparency: false)
-        let controller = WindowController(appearance: model, tab: Tab(profile: .temporary()))
+        let controller = WindowController(appearance: model, tabs: TabManager(profile: .temporary(), keepsSpare: false))
         controller.revealRailImmediately()
         #expect(controller.rail.isHidden == false)
         #expect(controller.rail.frame.minX == Rail.inset)

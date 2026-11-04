@@ -14,6 +14,12 @@ import WebKit
         let webView = WKWebView(frame: .zero, configuration: configuration)
         #expect(PrivateAPI.missingSelectors(on: webView).isEmpty)
     }
+    /// Real capture can't be simulated, so `inspectorAPIsStillExist` is what catches `_displayCaptureState` going away.
+    @Test func aFreshPageIsntCapturing() {
+        let tab = Tab(profile: .temporary())
+        #expect(!PrivateAPI.isCapturingDisplay(tab.webView))
+        #expect(!tab.isCapturing)
+    }
     @Test func blurNeverReturnsToZeroOnceUsed() {
         var gate = BlurGate()
         #expect(gate.radiusToSend(0) == 0)

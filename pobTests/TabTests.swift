@@ -28,9 +28,12 @@ import WebKit
         let result = try await tab.webView.evaluateJavaScript("typeof navigator.mediaDevices?.getDisplayMedia") as? String
         #expect(result == "function")
     }
-    @Test func linksStayInTheTabAndScriptsGetPopups() {
-        #expect(Tab.popupPolicy(for: .linkActivated) == .sameTab)
-        #expect(Tab.popupPolicy(for: .other) == .popupWindow)
+    @Test func aSuppliedConfigurationIsUsedUnchanged() {
+        let configuration = WKWebViewConfiguration()
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
+        let tab = Tab(profile: .temporary(), configuration: configuration)
+        #expect(tab.webView.configuration.preferences === configuration.preferences)
+        #expect(tab.webView.configuration.preferences.javaScriptCanOpenWindowsAutomatically)
     }
     @Test func promptNamesTheSiteAndDevice() {
         #expect(Permissions.promptText(host: "meet.example.com", type: .camera) == "Allow meet.example.com to use your camera?")

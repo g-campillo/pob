@@ -2,7 +2,8 @@ import AppKit
 import WebKit
 
 final class WindowController: NSWindowController, NSPopoverDelegate {
-    let tab: Tab
+    let tabs: TabManager
+    var tab: Tab? { tabs.activeTab }
     let rail = Rail()
     let backdrop = BackdropView()
     private(set) var usesFallbackBlur = false
@@ -10,6 +11,8 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
 
     private let appearance: AppearanceModel
     private let contentView = NSView()
+    private let topStrip = TopDragStrip()
+    private weak var shownPage: NSView?
     private var blurGate = BlurGate()
     private var fallbackBlurView: NSVisualEffectView?
     private let edgeStrip = EdgeStrip()
@@ -17,9 +20,9 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
     private var railCloseTask: Task<Void, Never>?
     private var openPopover: NSPopover?
 
-    init(appearance: AppearanceModel, tab: Tab) {
+    init(appearance: AppearanceModel, tabs: TabManager) {
         self.appearance = appearance
-        self.tab = tab
+        self.tabs = tabs
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
@@ -38,8 +41,10 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
 
         buildContent(in: window)
         connectRail()
+        connectTabs()
         setWindowButtonsVisible(false)
         appearance.addObserver { [weak self] in self?.applyAppearance() }
+        showActiveTab()
         applyAppearance()
     }
 
@@ -49,7 +54,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
     func applyAppearance() {
         guard let window else { return }
         let effective = appearance.effective
-        tab.webView.alphaValue = effective.pageAlpha
+        applyPageStyle()
         backdrop.alphaValue = effective.pageAlpha < 1 ? 0.25 : 1
 
         if !PrivateAPI.setWindowBlur(window, radius: blurGate.radiusToSend(effective.blurRadius)) {
@@ -61,15 +66,39 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
 
     func perform(_ id: CommandID) {
         switch id {
-        case .back: tab.webView.goBack()
-        case .forward: tab.webView.goForward()
-        case .reload: tab.webView.reload()
+        case .back: tab?.webView.goBack()
+        case .forward: tab?.webView.goForward()
+        case .reload: tab?.webView.reload()
         case .snapOpaque: appearance.toggleSnap()
-        case .closeWindow: windowToClose(keyWindow: NSApp.keyWindow)?.performClose(nil)
+        case .closeWindow: window?.performClose(nil)
+        case .closeTab:
+            if let active = tabs.list.activeID {
+                tabs.close(active)
+            } else {
+                window?.performClose(nil)
+            }
+        case .reopenTab: tabs.reopenLast()
+        case .nextTab: tabs.activateNext()
+        case .previousTab: tabs.activatePrevious()
+        case .selectTab1: tabs.activate(index: 0)
+        case .selectTab2: tabs.activate(index: 1)
+        case .selectTab3: tabs.activate(index: 2)
+        case .selectTab4: tabs.activate(index: 3)
+        case .selectTab5: tabs.activate(index: 4)
+        case .selectTab6: tabs.activate(index: 5)
+        case .selectTab7: tabs.activate(index: 6)
+        case .selectTab8: tabs.activate(index: 7)
+        case .selectTab9: tabs.activate(index: 8)
+        case .openSwitcher, .openSwitcherFromPage:
+            // shortcut: a blank tab stands in for the switcher, replace this when the switcher exists
+            tabs.newTab(nil, activate: true)
+            perform(.focusAddress)
+        case .newWindow:
+            break // shortcut: there's one window for now, open another here when AppController manages several
         case .toggleRail:
             railState.toggleShortcut()
             if railState.visibility == .hidden {
-                window?.makeFirstResponder(tab.webView)
+                window?.makeFirstResponder(tab?.webView)
             }
             applyRailState()
         case .focusAddress:
@@ -77,25 +106,22 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
             applyRailState()
             rail.addressField.selectText(nil)
         case .toggleInspector:
-            let webView = tab.webView
+            guard let webView = tab?.webView else { return }
             let opened = PrivateAPI.isInspectorVisible(webView)
                 ? PrivateAPI.closeInspector(webView)
                 : PrivateAPI.showInspector(webView)
             reportInspector(available: opened)
         case .showConsole:
-            reportInspector(available: PrivateAPI.showConsole(tab.webView))
+            guard let webView = tab?.webView else { return }
+            reportInspector(available: PrivateAPI.showConsole(webView))
         case .showPageSource:
-            reportInspector(available: PrivateAPI.showPageSource(tab.webView))
+            guard let webView = tab?.webView else { return }
+            reportInspector(available: PrivateAPI.showPageSource(webView))
         case .openInSafari:
             openInSafari()
         case .signIn:
             showSignInPopover()
         }
-    }
-
-    /// Popups are separate windows, so the shortcut closes whichever window is in front.
-    func windowToClose(keyWindow: NSWindow?) -> NSWindow? {
-        keyWindow ?? window
     }
 
     /// Popovers anchor to the rail, so it has to be in place before one opens.
@@ -108,7 +134,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
     func applyRailState(animated: Bool = true) {
         let isVisible = railState.visibility != .hidden
         setWindowButtonsVisible(isVisible)
-        tab.webView.obscuredContentInsets.left = railState.visibility == .pinned ? Rail.width + 2 * Rail.inset : 0
+        applyPageStyle()
 
         if isVisible {
             rail.isHidden = false
@@ -145,19 +171,14 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
         backdrop.autoresizingMask = [.width, .height]
         contentView.addSubview(backdrop)
 
-        let webView = tab.webView
-        webView.frame = contentView.bounds
-        webView.autoresizingMask = [.width, .height]
-        contentView.addSubview(webView)
-
-        let strip = TopDragStrip(frame: NSRect(
+        topStrip.frame = NSRect(
             x: 0,
             y: contentView.bounds.height - TopDragStrip.height,
             width: contentView.bounds.width,
             height: TopDragStrip.height
-        ))
-        strip.autoresizingMask = [.width, .minYMargin]
-        contentView.addSubview(strip)
+        )
+        topStrip.autoresizingMask = [.width, .minYMargin]
+        contentView.addSubview(topStrip)
 
         rail.translatesAutoresizingMaskIntoConstraints = false
         rail.isHidden = true
@@ -203,20 +224,52 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
         rail.onSubmit = { [weak self] text in
             guard let self else { return }
             if let input = AddressInput.classify(text) {
-                tab.load(input)
+                tab?.load(input)
             }
-            window?.makeFirstResponder(tab.webView)
+            window?.makeFirstResponder(tab?.webView)
         }
         rail.onCancel = { [weak self] in
             guard let self else { return }
             updateRailContents()
+            window?.makeFirstResponder(tab?.webView)
+        }
+    }
+
+    private func connectTabs() {
+        tabs.onChange = { [weak self] in self?.updateRailContents() }
+        tabs.onActiveChange = { [weak self] in
+            guard let self else { return }
+            showActiveTab()
+            if tabs.isEmpty {
+                window?.performClose(nil)
+            }
+        }
+    }
+
+    /// Puts the active page under the top strip. `TabManager` detaches the tabs it steps down, so the page
+    /// being replaced is only still here if it's capturing. Clear, not hidden, because hidden pages stop running.
+    private func showActiveTab() {
+        shownPage?.alphaValue = 0
+        shownPage = tab?.pageView
+        if let tab {
+            tab.pageView.alphaValue = 1
+            tab.pageView.frame = contentView.bounds
+            contentView.addSubview(tab.pageView, positioned: .below, relativeTo: topStrip)
             window?.makeFirstResponder(tab.webView)
         }
-        tab.onStateChange = { [weak self] in self?.updateRailContents() }
+        applyPageStyle()
+        updateRailContents()
+    }
+
+    private func applyPageStyle() {
+        guard let webView = tab?.webView else { return }
+        webView.alphaValue = appearance.effective.pageAlpha
+        webView.obscuredContentInsets.left = railState.visibility == .pinned ? Rail.width + 2 * Rail.inset : 0
     }
 
     private func updateRailContents() {
-        rail.update(url: tab.webView.url, canGoBack: tab.webView.canGoBack, canGoForward: tab.webView.canGoForward)
+        let webView = tab?.webView
+        rail.update(url: webView?.url, canGoBack: webView?.canGoBack ?? false, canGoForward: webView?.canGoForward ?? false)
     }
 
     /// The rail closes shortly after the pointer leaves, unless it comes back or is still over the rail.
@@ -238,7 +291,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
     }
 
     private func openInSafari() {
-        guard let url = tab.safariURL else { return }
+        guard let url = tab?.safariURL else { return }
         guard let safari = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.Safari") else { return }
         NSWorkspace.shared.open(
             [url],
@@ -252,6 +305,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
     }
 
     private func showSignInPopover() {
+        guard let tab else { return }
         revealRailImmediately()
         let host = tab.webView.url?.host() ?? "this site"
         let popover = SignInPopover(host: host) { [weak self] username, password in
@@ -263,8 +317,8 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
     private func fillLogin(username: String, password: String) {
         openPopover?.close()
         Task { [weak self] in
-            guard let self else { return }
-            let filled = (try? await LoginFiller.fill(tab.webView, username: username, password: password)) ?? false
+            guard let self, let webView = tab?.webView else { return }
+            let filled = (try? await LoginFiller.fill(webView, username: username, password: password)) ?? false
             if !filled {
                 let alert = NSAlert()
                 alert.messageText = "No sign-in form was found on this page."
@@ -300,7 +354,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
         blurView.blendingMode = .behindWindow
         blurView.material = .underWindowBackground
         blurView.state = .active
-        contentView.addSubview(blurView, positioned: .below, relativeTo: tab.webView)
+        contentView.addSubview(blurView, positioned: .above, relativeTo: backdrop)
         fallbackBlurView = blurView
         usesFallbackBlur = true
     }

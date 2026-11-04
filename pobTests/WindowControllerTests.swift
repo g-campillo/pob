@@ -1,13 +1,22 @@
 import AppKit
 import Foundation
 import Testing
+import WebKit
 @testable import pob
 
 @Suite struct WindowControllerTests {
-    func make() -> (WindowController, AppearanceModel) {
+    func emptyTabs() -> TabManager { TabManager(profile: .temporary(), keepsSpare: false) }
+
+    func make(_ tabs: TabManager) -> (WindowController, AppearanceModel) {
         let url = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString + ".json")
         let model = AppearanceModel(store: SettingsStore(fileURL: url), reduceTransparency: false)
-        return (WindowController(appearance: model, tab: Tab(profile: .temporary())), model)
+        return (WindowController(appearance: model, tabs: tabs), model)
+    }
+
+    func make() -> (WindowController, AppearanceModel) {
+        let tabs = emptyTabs()
+        tabs.newTab(nil, activate: true)
+        return make(tabs)
     }
 
     @Test func windowIsClearAndChromeless() throws {
@@ -23,11 +32,12 @@ import Testing
         let (controller, _) = make()
         #expect(controller.window?.standardWindowButton(.closeButton)?.isHidden == true)
     }
-    @Test func appearanceDrivesThePage() {
+    @Test func appearanceDrivesThePage() throws {
         let (controller, model) = make()
-        #expect(abs(controller.tab.webView.alphaValue - 0.82) < 0.0001)
+        let webView = try #require(controller.tab?.webView)
+        #expect(abs(webView.alphaValue - 0.82) < 0.0001)
         model.toggleSnap()
-        #expect(controller.tab.webView.alphaValue == 1)
+        #expect(webView.alphaValue == 1)
     }
     @Test func privateBlurIsInUseOnThisMac() {
         #expect(!make().0.usesFallbackBlur)
@@ -38,13 +48,6 @@ import Testing
         #expect(model.isSnappedOpaque)
     }
 
-    @Test func closingTargetsTheFrontWindow() {
-        let (controller, _) = make()
-        let popup = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
-        #expect(controller.windowToClose(keyWindow: popup) === popup)
-        #expect(controller.windowToClose(keyWindow: nil) === controller.window)
-    }
-
     /// With nothing on screen and no page yet, a fully clear window can't be seen at all.
     @Test func blankWindowIsVisibleAndSnappingMakesItSolid() {
         let (controller, model) = make()
@@ -52,5 +55,221 @@ import Testing
         #expect(controller.backdrop.superview?.subviews.first === controller.backdrop)
         model.toggleSnap()
         #expect(controller.backdrop.alphaValue == 1)
+    }
+
+    @Test func theActivePageFillsTheWindowUnderTheTopStrip() throws {
+        let tabs = emptyTabs()
+        let first = tabs.newTab(nil, activate: true)
+        let (controller, _) = make(tabs)
+        let content = try #require(controller.window?.contentView)
+        #expect(first.webView.frame.size == content.bounds.size)
+
+        let second = tabs.newTab(nil, activate: true)
+        #expect(first.pageView.superview == nil)
+        #expect(second.pageView.superview === content)
+        #expect(second.webView.frame.size == content.bounds.size)
+        let strip = try #require(content.subviews.firstIndex { $0 is TopDragStrip })
+        #expect(content.subviews[strip - 1] === second.pageView)
+        #expect(controller.tab === second)
+    }
+    @Test func theIncomingPageTakesTheWindowsCurrentLook() {
+        let tabs = emptyTabs()
+        tabs.newTab(nil, activate: true)
+        let (controller, _) = make(tabs)
+        controller.perform(.toggleRail)
+        let incoming = tabs.newTab(nil, activate: true)
+        #expect(abs(incoming.webView.alphaValue - 0.82) < 0.0001)
+        #expect(incoming.webView.obscuredContentInsets.left == 256)
+        #expect(controller.tab === incoming)
+    }
+    @Test func aCapturingPageKeepsRunningBehindTheActivePage() throws {
+        let tabs = emptyTabs()
+        let call = tabs.newTab(nil, activate: true)
+        let callID = try #require(tabs.list.activeID)
+        let (controller, _) = make(tabs)
+        let content = try #require(controller.window?.contentView)
+        tabs.isCapturing = { $0 === call }
+
+        let other = tabs.newTab(nil, activate: true)
+        let otherID = try #require(tabs.list.activeID)
+        #expect(call.pageView.superview === content)
+        #expect(call.pageView.alphaValue == 0)
+        #expect(!call.pageView.isHidden)
+        #expect(try #require(content.subviews.firstIndex(of: call.pageView)) < #require(content.subviews.firstIndex(of: other.pageView)))
+
+        tabs.activate(callID)
+        #expect(call.pageView.alphaValue == 1)
+        #expect(abs(call.webView.alphaValue - 0.82) < 0.0001)
+        #expect(other.pageView.superview == nil)
+        #expect(try #require(content.subviews.firstIndex { $0 is TopDragStrip }) - 1 == content.subviews.firstIndex(of: call.pageView))
+
+        tabs.activate(otherID)
+        tabs.isCapturing = { _ in false }
+        tabs.updatePhases(now: .now, memoryPressure: false)
+        #expect(call.pageView.superview == nil)
+        #expect(controller.tab === other)
+    }
+    @Test func closingACapturingBackgroundTabTakesItOutOfTheWindow() throws {
+        let tabs = emptyTabs()
+        let call = tabs.newTab(nil, activate: true)
+        let id = try #require(tabs.list.activeID)
+        let (controller, _) = make(tabs)
+        tabs.isCapturing = { $0 === call }
+        let other = tabs.newTab(nil, activate: true)
+        #expect(call.pageView.superview != nil)
+        tabs.close(id)
+        #expect(call.pageView.superview == nil)
+        #expect(controller.tab === other)
+    }
+    /// WebKit docks the inspector beside the page. Left behind, it would show through the next translucent page.
+    @Test func whateverWebKitDocksBesideThePageLeavesWithIt() throws {
+        let tabs = emptyTabs()
+        let first = tabs.newTab(nil, activate: true)
+        let id = try #require(tabs.list.activeID)
+        let (controller, _) = make(tabs)
+        let docked = NSView()
+        try #require(first.webView.superview).addSubview(docked)
+
+        tabs.newTab(nil, activate: true)
+        #expect(docked.window == nil)
+        tabs.activate(id)
+        #expect(docked.window === controller.window)
+    }
+
+    @Test func switchingTabsRefreshesTheRail() async throws {
+        let tabs = emptyTabs()
+        let first = tabs.newTab(nil, activate: true)
+        let id = try #require(tabs.list.activeID)
+        await finishLoading(first) { first.load(.url(URL(string: "data:text/html,one")!)) }
+        await finishLoading(first) { first.load(.url(URL(string: "data:text/html,two")!)) }
+        let (controller, _) = make(tabs)
+        #expect(controller.rail.addressField.stringValue == "data:text/html,two")
+        #expect(backButton(in: controller)?.isEnabled == true)
+
+        tabs.newTab(nil, activate: true)
+        #expect(controller.rail.addressField.stringValue == "")
+        #expect(backButton(in: controller)?.isEnabled == false)
+
+        tabs.activate(id)
+        #expect(controller.rail.addressField.stringValue == "data:text/html,two")
+        #expect(backButton(in: controller)?.isEnabled == true)
+    }
+    @Test func theActiveTabsNavigationReachesTheRail() async throws {
+        let (controller, _) = make()
+        let tab = try #require(controller.tab)
+        await finishLoading(tab) { tab.webView.loadHTMLString("<p>x</p>", baseURL: URL(string: "https://localhost/page")) }
+        #expect(controller.rail.addressField.stringValue == "https://localhost/page")
+    }
+    @Test func aBackgroundTabsNavigationLeavesTheRailAlone() async throws {
+        let tabs = emptyTabs()
+        let active = tabs.newTab(nil, activate: true)
+        let background = tabs.newTab(nil, activate: false)
+        await finishLoading(active) { active.load(.url(URL(string: "data:text/html,active")!)) }
+        let (controller, _) = make(tabs)
+
+        await finishLoading(background) { background.load(.url(URL(string: "data:text/html,one")!)) }
+        await finishLoading(background) { background.load(.url(URL(string: "data:text/html,two")!)) }
+        #expect(background.webView.canGoBack)
+        #expect(controller.rail.addressField.stringValue == "data:text/html,active")
+        #expect(backButton(in: controller)?.isEnabled == false)
+    }
+
+    /// Otherwise Return would send the old tab's half-typed address to the new tab.
+    @Test func switchingTabsMovesTheKeyboardToThePage() async throws {
+        let tabs = emptyTabs()
+        tabs.newTab(nil, activate: true)
+        let other = tabs.newTab(nil, activate: false)
+        await finishLoading(other) { other.load(.url(URL(string: "data:text/html,other")!)) }
+        let (controller, _) = make(tabs)
+        controller.perform(.focusAddress)
+        controller.rail.addressField.stringValue = "half typed"
+
+        tabs.activateNext()
+        #expect(controller.window?.firstResponder === other.webView)
+        #expect(controller.rail.addressField.stringValue == "data:text/html,other")
+        #expect(!controller.railState.isEditingAddress)
+    }
+
+    @Test func tabCommandsDriveTheTabs() throws {
+        let tabs = emptyTabs()
+        let (controller, _) = make(tabs)
+        for _ in 0..<10 { tabs.newTab(nil, activate: false) }
+        let ids = tabs.list.records.map(\.id)
+        let selectors: [CommandID] = [.selectTab1, .selectTab2, .selectTab3, .selectTab4, .selectTab5, .selectTab6, .selectTab7, .selectTab8]
+        for (index, command) in selectors.enumerated() {
+            controller.perform(command)
+            #expect(tabs.list.activeID == ids[index], "\(command)")
+        }
+        controller.perform(.selectTab9)
+        #expect(tabs.list.activeID == ids.last)
+
+        controller.perform(.selectTab2)
+        controller.perform(.nextTab)
+        #expect(tabs.list.activeID == ids[2])
+        controller.perform(.previousTab)
+        #expect(tabs.list.activeID == ids[1])
+
+        controller.perform(.closeTab)
+        #expect(tabs.list.records.count == 9)
+        controller.perform(.reopenTab)
+        #expect(tabs.list.records.count == 10)
+        #expect(tabs.list.activeID == ids[1])
+    }
+    @Test(arguments: [CommandID.openSwitcher, .openSwitcherFromPage])
+    func untilTheSwitcherExistsItOpensABlankTabToTypeIn(command: CommandID) {
+        let (controller, _) = make()
+        controller.perform(command)
+        #expect(controller.tabs.list.records.count == 2)
+        #expect(controller.tab?.webView.url == nil)
+        #expect(controller.railState.isEditingAddress)
+    }
+    @Test func newWindowDoesNothingYet() {
+        let (controller, _) = make()
+        controller.perform(.newWindow)
+        #expect(controller.tabs.list.records.count == 1)
+    }
+    @Test func commandsAreSafeWithNoTabs() {
+        let tabs = emptyTabs()
+        let (controller, _) = make(tabs)
+        for command in CommandID.allCases where command != .openSwitcher && command != .openSwitcherFromPage {
+            controller.perform(command)
+        }
+        #expect(tabs.isEmpty)
+        #expect(controller.tab == nil)
+    }
+    @Test func closingTheLastTabClosesTheWindow() async throws {
+        let (controller, _) = make()
+        let window = try #require(controller.window)
+        await confirmation { closed in
+            let observer = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: nil) { _ in closed() }
+            controller.perform(.closeTab)
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+    @Test func aPageClosingTheLastTabClosesTheWindow() async throws {
+        let (controller, _) = make()
+        let window = try #require(controller.window)
+        let tab = try #require(controller.tab)
+        await confirmation { closed in
+            let observer = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: nil) { _ in closed() }
+            tab.webViewDidClose(tab.webView)
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+    @Test func closingAnotherTabLeavesTheWindowOpen() async throws {
+        let tabs = emptyTabs()
+        tabs.newTab(nil, activate: true)
+        tabs.newTab(nil, activate: true)
+        let (controller, _) = make(tabs)
+        let window = try #require(controller.window)
+        await confirmation(expectedCount: 0) { closed in
+            let observer = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: nil) { _ in closed() }
+            controller.perform(.closeTab)
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    private func backButton(in controller: WindowController) -> NSButton? {
+        controller.rail.subviewsDeep.compactMap { $0 as? NSButton }.first { $0.accessibilityLabel() == "Back" }
     }
 }

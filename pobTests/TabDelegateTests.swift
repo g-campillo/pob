@@ -14,6 +14,7 @@ import Testing
         "webView:runJavaScriptTextInputPanelWithPrompt:defaultText:initiatedByFrame:completionHandler:",
         "webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:",
         "webView:didFinishNavigation:",
+        "webView:decidePolicyForNavigationAction:decisionHandler:",
     ])
     func webKitCanReachDelegateMethod(selector: String) {
         #expect(Tab(profile: .temporary()).responds(to: NSSelectorFromString(selector)))

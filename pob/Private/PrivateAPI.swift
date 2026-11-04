@@ -39,6 +39,12 @@ enum PrivateAPI {
         )
     }
 
+    /// WebKit's public capture states don't include screen sharing. Anything but 0 means it's in use, muted included.
+    static func isCapturingDisplay(_ webView: WKWebView) -> Bool {
+        guard webView.responds(to: NSSelectorFromString("_displayCaptureState")) else { return false }
+        return (webView.value(forKey: "_displayCaptureState") as? Int ?? 0) != 0
+    }
+
     /// Key-value coding throws an exception Swift can't catch when a key is gone,
     /// so check the setter first. Returns false when it's missing.
     @discardableResult
@@ -76,7 +82,7 @@ enum PrivateAPI {
     }
 
     static func missingSelectors(on webView: WKWebView) -> [String] {
-        var missing = ["_inspector", "_mainFrame", "_drawsBackground", "_setDrawsBackground:"]
+        var missing = ["_inspector", "_mainFrame", "_drawsBackground", "_setDrawsBackground:", "_displayCaptureState"]
             .filter { !webView.responds(to: NSSelectorFromString($0)) }
         if !webView.configuration.preferences.responds(to: NSSelectorFromString("_setDeveloperExtrasEnabled:")) {
             missing.append("_setDeveloperExtrasEnabled:")
