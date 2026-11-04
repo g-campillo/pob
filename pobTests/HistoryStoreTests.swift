@@ -87,7 +87,8 @@ import Testing
         let profile = Profile.temporary()
         let tabs = TabManager(profile: profile, keepsSpare: false)
         let tab = tabs.newTab(nil, activate: true)
-        await finishLoading(tab) { tab.webView.loadHTMLString("<title>Zebra</title>", baseURL: URL(string: "https://localhost/plain")) }
+        await finishLoading(tab) { tab.webView.loadHTMLString("<p>no title yet</p>", baseURL: URL(string: "https://localhost/plain")) }
+        _ = try? await tab.webView.evaluateJavaScript("document.title = 'Zebra'")
         let found = await eventually { await profile.history.search("zebra", limit: 5).first?.visitCount == 1 }
         #expect(found)
     }
