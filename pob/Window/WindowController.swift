@@ -1,7 +1,7 @@
 import AppKit
 import WebKit
 
-final class WindowController: NSWindowController {
+final class WindowController: NSWindowController, NSPopoverDelegate {
     let tab: Tab
     let rail = Rail()
     private(set) var usesFallbackBlur = false
@@ -14,6 +14,7 @@ final class WindowController: NSWindowController {
     private let edgeStrip = EdgeStrip()
     private var railLeading: NSLayoutConstraint?
     private var railCloseTask: Task<Void, Never>?
+    private var openPopover: NSPopover?
 
     init(appearance: AppearanceModel, tab: Tab) {
         self.appearance = appearance
@@ -151,6 +152,7 @@ final class WindowController: NSWindowController {
         edgeStrip.onExit = { [weak self] in self?.scheduleRailClose() }
         rail.onPointerExit = { [weak self] in self?.scheduleRailClose() }
         rail.onNavigate = { [weak self] in self?.perform($0) }
+        rail.onSettings = { [weak self] in self?.showAppearancePopover() }
         rail.onAddressFocus = { [weak self] in
             guard let self else { return }
             railState.beginEditingAddress()
@@ -185,10 +187,28 @@ final class WindowController: NSWindowController {
         railCloseTask?.cancel()
         railCloseTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(140))
-            guard !Task.isCancelled, let self, !isPointerOverRail else { return }
+            guard !Task.isCancelled, let self, !isPointerOverRail, openPopover == nil else { return }
             railState.pointerLeftRail()
             applyRailState()
         }
+    }
+
+    private func showAppearancePopover() {
+        showPopover(AppearancePopover(model: appearance), from: rail.settingsButton)
+    }
+
+    private func showPopover(_ content: NSViewController, from anchor: NSView) {
+        let popover = NSPopover()
+        popover.behavior = .transient
+        popover.contentViewController = content
+        popover.delegate = self
+        openPopover = popover
+        popover.show(relativeTo: anchor.bounds, of: anchor, preferredEdge: .maxX)
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        openPopover = nil
+        scheduleRailClose()
     }
 
     private var isPointerOverRail: Bool {
