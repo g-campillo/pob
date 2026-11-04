@@ -34,6 +34,15 @@ import Testing
         try "nope".write(to: file.url, atomically: true, encoding: .utf8)
         #expect(BookmarkStore(file: file).all.isEmpty)
     }
+    /// The next ⌘D rewrites the file, so without a copy one typo would cost every bookmark.
+    @Test func aCorruptFileIsKeptBeforeTheNextBookmarkReplacesIt() throws {
+        let file = file()
+        try "nope".write(to: file.url, atomically: true, encoding: .utf8)
+        let store = BookmarkStore(file: file)
+        store.toggle(url: page, title: "A")
+        #expect(file.load()?.count == 1)
+        #expect(try String(contentsOf: file.url.appendingPathExtension("unreadable"), encoding: .utf8) == "nope")
+    }
     @Test func letterTilesUseTheHostsFirstLetter() {
         #expect(FaviconStore.letter(for: "www.example.com") == "E")
         #expect(FaviconStore.letter(for: "") == "?")

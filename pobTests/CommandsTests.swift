@@ -75,19 +75,23 @@ import Testing
         }
     }
 
-    /// A held key repeats until it's let go, so ⌘W would run through the tabs and on into the next window. Each repeat
-    /// has to be taken and not passed on, or the menu's key equivalent fires instead.
-    @Test func aHeldCloseClosesOnceAndTakesEveryRepeat() {
+    /// A held key repeats until it's let go, so ⌘W would run through the tabs and on into the next window, and ⌘N would
+    /// open a window per repeat. Each repeat has to be taken and not passed on, or the menu's key equivalent fires instead.
+    @Test func aHeldCloseOrNewWindowActsOnceAndTakesEveryRepeat() {
         var received: [CommandID] = []
         let recording = CommandList.standard { received.append($0) }
-        let closes: [(String, NSEvent.ModifierFlags, CommandID)] = [("w", .command, .closeTab), ("W", [.shift, .command], .closeWindow)]
-        for (key, modifiers, id) in closes {
+        let held: [(String, UInt16, NSEvent.ModifierFlags, CommandID)] = [
+            ("w", 13, .command, .closeTab),
+            ("W", 13, [.shift, .command], .closeWindow),
+            ("n", 45, .command, .newWindow),
+        ]
+        for (key, keyCode, modifiers, id) in held {
             received = []
-            #expect(recording.performReserved(keyDown(key, keyCode: 13, modifiers)))
+            #expect(recording.performReserved(keyDown(key, keyCode: keyCode, modifiers)))
             for _ in 0..<3 {
-                #expect(recording.performReserved(keyDown(key, keyCode: 13, modifiers, isARepeat: true)))
+                #expect(recording.performReserved(keyDown(key, keyCode: keyCode, modifiers, isARepeat: true)))
             }
-            #expect(received == [id])
+            #expect(received == [id], "\(id)")
         }
     }
     @Test func otherReservedKeysKeepRepeating() {

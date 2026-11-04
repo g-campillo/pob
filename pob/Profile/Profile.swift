@@ -6,7 +6,8 @@ final class Profile {
     let id: UUID
     let directory: URL
     let isPersistent: Bool
-    let dataStore: WKWebsiteDataStore
+    /// Built on first use, because building it makes folders in the store, and a test reading `Profile.initial` mustn't.
+    lazy var dataStore: WKWebsiteDataStore = isPersistent ? WKWebsiteDataStore(forIdentifier: id) : .nonPersistent()
 
     lazy var siteSettings = SiteSettings(file: JSONFile(url: directory.appending(path: "sites.json")))
 
@@ -42,7 +43,6 @@ final class Profile {
         self.id = id
         self.directory = directory
         self.isPersistent = isPersistent
-        dataStore = isPersistent ? WKWebsiteDataStore(forIdentifier: id) : .nonPersistent()
     }
 
     func prepareSpareTab() {

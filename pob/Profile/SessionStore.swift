@@ -34,18 +34,13 @@ final class SessionStore {
         self.file = file
     }
 
-    /// Empty when the file is missing or can't be read. One that can't be read is copied first, because the first tab
-    /// of a fresh session replaces it.
+    /// Empty when the file is missing or can't be read.
     func load() -> SessionSnapshot {
-        do {
-            let snapshot = try file.read() ?? SessionSnapshot(windows: [])
-            hasHadTabs = !snapshot.windows.isEmpty
-            return snapshot
-        } catch {
-            NSLog("Can't read the session: %@", String(describing: error))
-            keepUnreadableFile()
-            return SessionSnapshot(windows: [])
-        }
+        let loaded = file.loadChecked()
+        let snapshot = loaded.value ?? SessionSnapshot(windows: [])
+        hasHadTabs = !snapshot.windows.isEmpty
+        mustKeepFile = !loaded.isReplaceable
+        return snapshot
     }
 
     /// Hands the session to `open` with saves held until it returns. An exception, which AppKit swallows during launch,
@@ -76,15 +71,6 @@ final class SessionStore {
             if let job = writeJob(for: snapshot()) {
                 writes.async(execute: job)
             }
-        }
-    }
-
-    private func keepUnreadableFile() {
-        do {
-            try Data(contentsOf: file.url).write(to: file.url.appendingPathExtension("unreadable"), options: .atomic)
-        } catch {
-            NSLog("Can't copy the unreadable session, so nothing will replace it: %@", String(describing: error))
-            mustKeepFile = true
         }
     }
 

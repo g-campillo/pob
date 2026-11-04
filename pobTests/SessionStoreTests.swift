@@ -443,7 +443,7 @@ private final class Reached {
         #expect(try String(contentsOf: copy, encoding: .utf8) == unreadable)
 
         controller.tabs.newTab(nil, activate: true)
-        #expect(await eventually { file.load()?.windows.count == 1 })
+        #expect(await eventually { (try? file.read())?.windows.count == 1 })
         #expect(try String(contentsOf: copy, encoding: .utf8) == unreadable)
     }
     @Test func closingAnEmptyWindowLeavesAnUnreadSessionAlone() async throws {
