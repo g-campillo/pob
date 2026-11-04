@@ -59,6 +59,15 @@ import Testing
         controller.perform(.toggleRail)
         #expect(controller.tab.webView.obscuredContentInsets.left == 0)
     }
+
+    @Test func revealingImmediatelyPutsTheRailInPlaceForPopovers() {
+        let url = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString + ".json")
+        let model = AppearanceModel(store: SettingsStore(fileURL: url), reduceTransparency: false)
+        let controller = WindowController(appearance: model, tab: Tab(profile: .initial))
+        controller.revealRailImmediately()
+        #expect(controller.rail.isHidden == false)
+        #expect(controller.rail.frame.minX == Rail.inset)
+    }
 }
 
 extension NSView {

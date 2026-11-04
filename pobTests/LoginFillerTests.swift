@@ -36,4 +36,24 @@ import WebKit
         #expect(popover.usernameField.contentType == .username)
         #expect(popover.passwordField.contentType == .password)
     }
+
+    /// React-style tracking replaces `value` on the element. Filling from an isolated world
+    /// bypasses that page-side setter, so the page sees a real change.
+    @Test func pagesThatTrackValueStillNoticeTheFill() async throws {
+        let tab = await tabWith(html: """
+        <input id=p type=password>
+        <script>
+        const native = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+        let tracked = '';
+        Object.defineProperty(p, 'value', {
+            get() { return native.get.call(this); },
+            set(v) { tracked = v; native.set.call(this, v); }
+        });
+        window.noticed = false;
+        p.addEventListener('input', () => { window.noticed = p.value !== tracked; });
+        </script>
+        """)
+        _ = try await LoginFiller.fill(tab.webView, username: "a", password: "secret")
+        #expect(try await tab.webView.evaluateJavaScript("window.noticed") as? Bool == true)
+    }
 }

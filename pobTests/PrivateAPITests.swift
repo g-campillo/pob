@@ -21,4 +21,8 @@ import WebKit
         #expect(gate.radiusToSend(0) == 1)
         #expect(gate.radiusToSend(8) == 8)
     }
+
+    @Test func unknownPrivateKeysAreSkippedInsteadOfCrashing() {
+        #expect(PrivateAPI.setValue(true, forKey: "madeUpKey", setter: "_setMadeUpKey:", on: NSObject()) == false)
+    }
 }

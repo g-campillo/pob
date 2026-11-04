@@ -37,4 +37,11 @@ import Testing
         controller.perform(.snapOpaque)
         #expect(model.isSnappedOpaque)
     }
+
+    @Test func closingTargetsTheFrontWindow() {
+        let (controller, _) = make()
+        let popup = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+        #expect(controller.windowToClose(keyWindow: popup) === popup)
+        #expect(controller.windowToClose(keyWindow: nil) === controller.window)
+    }
 }

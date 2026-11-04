@@ -27,4 +27,15 @@ import Testing
         popover.slidersFinished()
         #expect(store.load() == AppearanceSettings(transparency: 0.4, blur: 30))
     }
+
+    @Test func closingThePopoverSavesKeyboardChanges() {
+        let url = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString + ".json")
+        let store = SettingsStore(fileURL: url)
+        let popover = AppearancePopover(model: AppearanceModel(store: store, reduceTransparency: false))
+        popover.loadView()
+        popover.blurSlider.doubleValue = 30
+        popover.slidersChanged()
+        popover.viewWillDisappear()
+        #expect(store.load().blur == 30)
+    }
 }

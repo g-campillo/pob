@@ -22,15 +22,30 @@ enum PrivateAPI {
     }
 
     static func setDrawsBackground(_ webView: WKWebView, _ draws: Bool) {
-        webView.setValue(draws, forKey: "drawsBackground")
+        setValue(draws, forKey: "drawsBackground", setter: "_setDrawsBackground:", on: webView)
     }
 
     static func drawsBackground(_ webView: WKWebView) -> Bool {
-        webView.value(forKey: "drawsBackground") as? Bool ?? true
+        guard webView.responds(to: NSSelectorFromString("_drawsBackground")) else { return true }
+        return webView.value(forKey: "drawsBackground") as? Bool ?? true
     }
 
     static func enableDeveloperExtras(_ configuration: WKWebViewConfiguration) {
-        configuration.preferences.setValue(true, forKey: "developerExtrasEnabled")
+        setValue(
+            true,
+            forKey: "developerExtrasEnabled",
+            setter: "_setDeveloperExtrasEnabled:",
+            on: configuration.preferences
+        )
+    }
+
+    /// Key-value coding throws an exception Swift can't catch when a key is gone,
+    /// so check the setter first. Returns false when it's missing.
+    @discardableResult
+    static func setValue(_ value: Any?, forKey key: String, setter: String, on object: NSObject) -> Bool {
+        guard object.responds(to: NSSelectorFromString(setter)) else { return false }
+        object.setValue(value, forKey: key)
+        return true
     }
 
     static func showInspector(_ webView: WKWebView) -> Bool {
@@ -42,7 +57,9 @@ enum PrivateAPI {
     }
 
     static func isInspectorVisible(_ webView: WKWebView) -> Bool {
-        inspector(of: webView)?.value(forKey: "isVisible") as? Bool ?? false
+        guard let inspector = inspector(of: webView), inspector.responds(to: NSSelectorFromString("isVisible"))
+        else { return false }
+        return inspector.value(forKey: "isVisible") as? Bool ?? false
     }
 
     static func showConsole(_ webView: WKWebView) -> Bool {
@@ -59,7 +76,11 @@ enum PrivateAPI {
     }
 
     static func missingSelectors(on webView: WKWebView) -> [String] {
-        var missing = ["_inspector", "_mainFrame"].filter { !webView.responds(to: NSSelectorFromString($0)) }
+        var missing = ["_inspector", "_mainFrame", "_drawsBackground", "_setDrawsBackground:"]
+            .filter { !webView.responds(to: NSSelectorFromString($0)) }
+        if !webView.configuration.preferences.responds(to: NSSelectorFromString("_setDeveloperExtrasEnabled:")) {
+            missing.append("_setDeveloperExtrasEnabled:")
+        }
         let inspector = inspector(of: webView)
         missing += inspectorSelectors.filter { inspector?.responds(to: NSSelectorFromString($0)) != true }
         return missing

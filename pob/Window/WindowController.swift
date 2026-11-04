@@ -63,7 +63,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
         case .forward: tab.webView.goForward()
         case .reload: tab.webView.reload()
         case .snapOpaque: appearance.toggleSnap()
-        case .closeWindow: window?.performClose(nil)
+        case .closeWindow: windowToClose(keyWindow: NSApp.keyWindow)?.performClose(nil)
         case .toggleRail:
             railState.toggleShortcut()
             if railState.visibility == .hidden {
@@ -91,7 +91,19 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
         }
     }
 
-    func applyRailState() {
+    /// Popups are separate windows, so the shortcut closes whichever window is in front.
+    func windowToClose(keyWindow: NSWindow?) -> NSWindow? {
+        keyWindow ?? window
+    }
+
+    /// Popovers anchor to the rail, so it has to be in place before one opens.
+    func revealRailImmediately() {
+        railState.pointerDwelledAtEdge()
+        applyRailState(animated: false)
+        contentView.layoutSubtreeIfNeeded()
+    }
+
+    func applyRailState(animated: Bool = true) {
         let isVisible = railState.visibility != .hidden
         setWindowButtonsVisible(isVisible)
         tab.webView.obscuredContentInsets.left = railState.visibility == .pinned ? Rail.width + 2 * Rail.inset : 0
@@ -99,11 +111,16 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
         if isVisible {
             rail.isHidden = false
         }
-        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let leading = isVisible ? Rail.inset : -(Rail.width + Rail.inset)
+        guard animated, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            railLeading?.constant = leading
+            rail.isHidden = !isVisible
+            return
+        }
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = reduceMotion ? 0 : 0.17
+            context.duration = 0.17
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            railLeading?.animator().constant = isVisible ? Rail.inset : -(Rail.width + Rail.inset)
+            railLeading?.animator().constant = leading
         } completionHandler: { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, self.railState.visibility == .hidden else { return }
@@ -227,8 +244,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
     }
 
     private func showSignInPopover() {
-        railState.pointerDwelledAtEdge()
-        applyRailState()
+        revealRailImmediately()
         let host = tab.webView.url?.host() ?? "this site"
         let popover = SignInPopover(host: host) { [weak self] username, password in
             self?.fillLogin(username: username, password: password)

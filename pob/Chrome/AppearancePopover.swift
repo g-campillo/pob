@@ -50,6 +50,12 @@ final class AppearancePopover: NSViewController {
         view = container
     }
 
+    /// Keyboard changes have no mouse-up, so closing the popover saves them too.
+    override func viewWillDisappear() {
+        super.viewWillDisappear()
+        slidersFinished()
+    }
+
     func slidersChanged() {
         model.settings = AppearanceSettings(
             transparency: transparencySlider.doubleValue.rounded() / 100,
