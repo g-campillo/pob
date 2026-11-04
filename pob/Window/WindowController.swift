@@ -18,7 +18,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
     private let edgeStrip = EdgeStrip()
     private var railLeading: NSLayoutConstraint?
     private var railCloseTask: Task<Void, Never>?
-    private var openPopover: NSPopover?
+    private(set) var openPopover: NSPopover?
 
     init(appearance: AppearanceModel, tabs: TabManager) {
         self.appearance = appearance
@@ -249,6 +249,8 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
     /// Puts the active page under the top strip. `TabManager` detaches the tabs it steps down, so the page
     /// being replaced is only still here if it's capturing. Clear, not hidden, because hidden pages stop running.
     private func showActiveTab() {
+        openPopover?.close()
+        openPopover = nil
         shownPage?.alphaValue = 0
         shownPage = tab?.pageView
         if let tab {
@@ -305,19 +307,19 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
     }
 
     private func showSignInPopover() {
-        guard let tab else { return }
+        guard let webView = tab?.webView else { return }
         revealRailImmediately()
-        let host = tab.webView.url?.host() ?? "this site"
+        let host = webView.url?.host() ?? "this site"
         let popover = SignInPopover(host: host) { [weak self] username, password in
-            self?.fillLogin(username: username, password: password)
+            self?.fillLogin(webView, username: username, password: password)
         }
         showPopover(popover, from: rail.addressField)
     }
 
-    private func fillLogin(username: String, password: String) {
+    private func fillLogin(_ webView: WKWebView, username: String, password: String) {
         openPopover?.close()
         Task { [weak self] in
-            guard let self, let webView = tab?.webView else { return }
+            guard let self else { return }
             let filled = (try? await LoginFiller.fill(webView, username: username, password: password)) ?? false
             if !filled {
                 let alert = NSAlert()
@@ -337,7 +339,9 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
     }
 
     func popoverDidClose(_ notification: Notification) {
-        openPopover = nil
+        if notification.object as? NSPopover === openPopover {
+            openPopover = nil
+        }
         scheduleRailClose()
     }
 

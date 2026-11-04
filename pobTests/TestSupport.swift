@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 @testable import pob
 
@@ -27,4 +28,24 @@ func eventually(_ condition: () async -> Bool) async -> Bool {
         try? await Task.sleep(for: .milliseconds(10))
     }
     return await condition()
+}
+
+private final class ModalWatch {
+    var sawModal = false
+}
+
+/// Runs `body` and reports whether a dialog went modal during it. It ends any that does, or the run would hang.
+func wentModal(during body: () async throws -> Void) async rethrows -> Bool {
+    let watch = ModalWatch()
+    let timer = Timer(timeInterval: 0.02, repeats: true) { _ in
+        MainActor.assumeIsolated {
+            guard NSApp.modalWindow != nil else { return }
+            watch.sawModal = true
+            NSApp.abortModal()
+        }
+    }
+    RunLoop.main.add(timer, forMode: .common)
+    defer { timer.invalidate() }
+    try await body()
+    return watch.sawModal
 }

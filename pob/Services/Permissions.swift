@@ -32,12 +32,13 @@ enum Permissions {
 }
 
 extension NSAlert {
-    /// Shows a sheet when there's a window, otherwise a modal alert.
+    /// Shows a sheet. A page with no window is in a background tab, and a dialog from it would
+    /// cover the active page with nothing to say which tab asked, so it's cancelled unseen.
     func present(in window: NSWindow?, completion: @escaping (NSApplication.ModalResponse) -> Void) {
         if let window {
             beginSheetModal(for: window, completionHandler: completion)
         } else {
-            completion(runModal())
+            completion(.cancel)
         }
     }
 }

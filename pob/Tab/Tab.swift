@@ -179,16 +179,15 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
         initiatedByFrame frame: WKFrameInfo,
         completionHandler: @escaping @MainActor ([URL]?) -> Void
     ) {
+        guard let window = webView.window else {
+            completionHandler(nil)
+            return
+        }
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = parameters.allowsMultipleSelection
         panel.canChooseDirectories = parameters.allowsDirectories
-        let finish: (NSApplication.ModalResponse) -> Void = { response in
+        panel.beginSheetModal(for: window) { response in
             completionHandler(response == .OK ? panel.urls : nil)
-        }
-        if let window = webView.window {
-            panel.beginSheetModal(for: window, completionHandler: finish)
-        } else {
-            finish(panel.runModal())
         }
     }
 }

@@ -191,6 +191,101 @@ import WebKit
         #expect(policy(of: call) == .suspend)
     }
 
+    /// `evaluateJavaScript` carries a user gesture, so this is a real popup with a real link to its opener.
+    @Test func aRealPopupKeepsItsOpenerAndReturnsToItWhenItCloses() async throws {
+        let tabs = manager()
+        let opener = tabs.newTab(nil, activate: true)
+        await finishLoading(opener) { opener.webView.loadHTMLString("<p>x</p>", baseURL: URL(string: "https://localhost/")) }
+        let neighbor = tabs.newTab(nil, activate: false)
+
+        #expect(try await opener.webView.evaluateJavaScript("window.open('about:blank') !== null") as? Bool == true)
+        #expect(tabs.list.records.count == 3)
+        let popup = try #require(tabs.activeTab)
+        #expect(popup !== opener)
+        #expect(popup !== neighbor)
+        #expect(tabs.liveTab(tabs.list.records[2].id) === neighbor)
+        #expect(try await popup.webView.evaluateJavaScript("window.opener !== null") as? Bool == true)
+
+        _ = try await popup.webView.evaluateJavaScript("window.close(); 1")
+        #expect(await eventually { tabs.list.records.count == 2 })
+        #expect(tabs.activeTab === opener)
+    }
+    /// Three tabs in a row: the opener, its popup, and a neighbor on the popup's right.
+    func popupBetweenItsOpenerAndANeighbor(in tabs: TabManager) throws -> (opener: Tab, popup: Tab, neighbor: Tab) {
+        let opener = tabs.newTab(nil, activate: true)
+        let neighbor = tabs.newTab(nil, activate: false)
+        _ = opener.onCreatePopup?(opener.webView.configuration)
+        return (opener, try #require(tabs.activeTab), neighbor)
+    }
+    @Test func closingAPopupWithTheKeyboardStillGoesToItsNeighbor() throws {
+        let tabs = manager()
+        let (_, _, neighbor) = try popupBetweenItsOpenerAndANeighbor(in: tabs)
+        tabs.close(try #require(tabs.list.activeID))
+        #expect(tabs.activeTab === neighbor)
+    }
+    @Test func aPopupWhoseOpenerHasGoneClosesToItsNeighbor() throws {
+        let tabs = manager()
+        let (_, popup, neighbor) = try popupBetweenItsOpenerAndANeighbor(in: tabs)
+        tabs.close(tabs.list.records[0].id)
+        popup.webViewDidClose(popup.webView)
+        #expect(tabs.activeTab === neighbor)
+        #expect(tabs.list.records.count == 1)
+    }
+    @Test func aBackgroundPopupClosingLeavesTheActiveTabAlone() throws {
+        let tabs = manager()
+        let (_, popup, neighbor) = try popupBetweenItsOpenerAndANeighbor(in: tabs)
+        tabs.activate(tabs.list.records[2].id)
+        popup.webViewDidClose(popup.webView)
+        #expect(tabs.activeTab === neighbor)
+        #expect(tabs.list.records.count == 2)
+    }
+
+    /// A page with no window is in a background tab. A dialog from it would cover the active page with
+    /// nothing to say which tab asked, so it gets the cancelled answer and nothing shows.
+    func backgroundPage(in tabs: TabManager) async -> WKWebView {
+        tabs.newTab(nil, activate: true)
+        let tab = tabs.newTab(nil, activate: false)
+        await finishLoading(tab) { tab.webView.loadHTMLString("<p>x</p>", baseURL: URL(string: "https://localhost/")) }
+        return tab.webView
+    }
+    @Test func aBackgroundPagesDialogsAreCancelledWithoutShowing() async throws {
+        let tabs = manager()
+        let page = await backgroundPage(in: tabs)
+        #expect(page.window == nil)
+        let modal = try await wentModal { () async throws in
+            #expect(try await page.evaluateJavaScript("typeof alert('Hello')") as? String == "undefined")
+            #expect(try await page.evaluateJavaScript("confirm('Leave?')") as? Bool == false)
+            #expect(try await page.evaluateJavaScript("String(prompt('Session expired. Password?', 'guess'))") as? String == "null")
+        }
+        #expect(!modal)
+    }
+    @Test func aBackgroundPageCantOpenAFilePanel() async throws {
+        let tabs = manager()
+        let page = await backgroundPage(in: tabs)
+        let script = """
+        return await new Promise(resolve => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.addEventListener('cancel', () => resolve('cancelled'));
+            input.addEventListener('change', () => resolve('chosen'));
+            setTimeout(() => resolve('no answer'), 3000);
+            input.click();
+        });
+        """
+        let modal = try await wentModal { () async throws in
+            #expect(try await page.callAsyncJavaScript(script, contentWorld: .page) as? String == "cancelled")
+        }
+        #expect(!modal)
+    }
+    @Test func aPageWithNoWindowIsDeniedWithoutAPrompt() async {
+        var decision: WKPermissionDecision?
+        let modal = await wentModal {
+            Permissions.ask(host: "example.com", type: .camera, in: nil) { decision = $0 }
+        }
+        #expect(!modal)
+        #expect(decision == .deny)
+    }
+
     @Test func commandClickingALinkOpensABackgroundTab() throws {
         let tabs = manager()
         let tab = tabs.newTab(nil, activate: true)

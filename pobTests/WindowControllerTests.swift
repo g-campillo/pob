@@ -174,6 +174,67 @@ import WebKit
         #expect(backButton(in: controller)?.isEnabled == false)
     }
 
+    /// Page code that reads its size while loading, like `matchMedia`, needs a real one even in a background tab.
+    @Test func aPageOpenedInTheBackgroundLoadsAtThePagesSize() async throws {
+        let tabs = emptyTabs()
+        let active = tabs.newTab(nil, activate: true)
+        let (controller, _) = make(tabs)
+        active.onOpenLink?(URLRequest(url: URL(string: "data:text/html,page")!), false)
+        let background = try #require(tabs.liveTab(tabs.list.records[1].id))
+        #expect(background.pageView.frame == active.pageView.frame)
+        #expect(background.webView.frame.size == active.webView.frame.size)
+        #expect(await eventually {
+            (try? await background.webView.evaluateJavaScript("innerWidth")) as? Int == 1200
+        })
+        #expect(try await background.webView.evaluateJavaScript("matchMedia('(max-width: 600px)').matches") as? Bool == false)
+        #expect(controller.tab === active)
+    }
+
+    /// `.transient` only reacts to the user, and a popup closing can move the active tab with the popover still up.
+    @Test func switchingTabsClosesAnOpenPopover() throws {
+        let tabs = emptyTabs()
+        tabs.newTab(nil, activate: true)
+        tabs.newTab(nil, activate: false)
+        let (controller, _) = make(tabs)
+        controller.perform(.signIn)
+        #expect(controller.openPopover != nil)
+        tabs.activateNext()
+        #expect(controller.openPopover == nil)
+    }
+    /// The closing fade can outlast a quick switch. If its late `popoverDidClose` wiped out the next popover,
+    /// that one would stay up untracked, and the next tab switch couldn't close it.
+    @Test func aPopoverClosingLateDoesntForgetTheNextOne() throws {
+        let (controller, _) = make()
+        controller.perform(.signIn)
+        let open = try #require(controller.openPopover)
+        controller.popoverDidClose(Notification(name: NSPopover.didCloseNotification, object: NSPopover()))
+        #expect(controller.openPopover === open)
+        controller.popoverDidClose(Notification(name: NSPopover.didCloseNotification, object: open))
+        #expect(controller.openPopover == nil)
+    }
+    @Test func theSignInPopoverFillsThePageItOpenedOn() async throws {
+        let tabs = emptyTabs()
+        let first = tabs.newTab(nil, activate: true)
+        let second = tabs.newTab(nil, activate: false)
+        let form = "<input id=u type=email><input id=p type=password>"
+        await finishLoading(first) { first.webView.loadHTMLString(form, baseURL: URL(string: "https://one.localhost/")) }
+        await finishLoading(second) { second.webView.loadHTMLString(form, baseURL: URL(string: "https://two.localhost/")) }
+        let (controller, _) = make(tabs)
+        controller.perform(.signIn)
+        let popover = try #require(controller.openPopover?.contentViewController as? SignInPopover)
+
+        tabs.activateNext()
+        popover.usernameField.stringValue = "a@b.c"
+        popover.passwordField.stringValue = "secret"
+        let fill = try #require(popover.view.subviewsDeep.compactMap { $0 as? NSButton }.first { $0.title == "Fill" })
+        fill.performClick(nil)
+
+        let script = "document.getElementById('p').value"
+        #expect(await eventually { (try? await first.webView.evaluateJavaScript(script)) as? String == "secret" })
+        #expect(try await second.webView.evaluateJavaScript(script) as? String == "")
+        #expect(controller.tab === second)
+    }
+
     /// Otherwise Return would send the old tab's half-typed address to the new tab.
     @Test func switchingTabsMovesTheKeyboardToThePage() async throws {
         let tabs = emptyTabs()

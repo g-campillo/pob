@@ -15,6 +15,7 @@ final class TabManager {
     private var tabs: [UUID: Tab] = [:]
     private var phases: [UUID: TabPhase] = [:]
     private var lastActive: [UUID: Date] = [:]
+    private var openers: [UUID: UUID] = [:]
 
     init(profile: Profile, keepsSpare: Bool = true) {
         self.profile = profile
@@ -42,6 +43,7 @@ final class TabManager {
 
     func close(_ id: UUID) {
         release(id)
+        openers[id] = nil
         changeList { $0.close(id) }
     }
 
@@ -69,8 +71,11 @@ final class TabManager {
         }
     }
 
-    private func add(_ tab: Tab, activate: Bool) {
+    private func add(_ tab: Tab, activate: Bool, opener: UUID? = nil) {
         let record = TabRecord(url: tab.webView.url)
+        openers[record.id] = opener
+        // A page opened in the background would otherwise run its load-time code at zero width.
+        tab.pageView.frame = activeTab?.pageView.frame ?? tab.pageView.frame
         adopt(tab, as: record.id)
         changeList { $0.add(record, activate: activate) }
     }
@@ -92,10 +97,18 @@ final class TabManager {
         tab.onCreatePopup = { [weak self] configuration in
             guard let self else { return nil }
             let popup = Tab(profile: profile, configuration: configuration)
-            add(popup, activate: true)
+            add(popup, activate: true, opener: id)
             return popup.webView
         }
-        tab.onCloseRequested = { [weak self] in self?.close(id) }
+        tab.onCloseRequested = { [weak self] in self?.closeFromPage(id) }
+    }
+
+    /// A finished sign-in reads as a bug if it lands on an unrelated tab, so an active popup hands back to its opener.
+    private func closeFromPage(_ id: UUID) {
+        if id == list.activeID, let opener = openers[id] {
+            activate(opener)
+        }
+        close(id)
     }
 
     /// Every change to the list comes through here, so the live tabs and the window follow it.
