@@ -199,6 +199,85 @@ import Testing
         fresh.save(empty)
         #expect(file.load() == empty)
     }
+
+    // MARK: Unreadable sessions
+
+    func copy(of file: JSONFile<SessionSnapshot>) -> URL { file.url.appendingPathExtension("unreadable") }
+    func hasCopy(of file: JSONFile<SessionSnapshot>) -> Bool { FileManager.default.fileExists(atPath: copy(of: file).path()) }
+
+    /// Decoding is all or nothing, so a typo costs the whole session unless the file is kept.
+    @Test func anUnreadableSessionIsCopiedBeforeTheFirstTabReplacesIt() throws {
+        let file = file()
+        let unreadable = "{\"windows\":"
+        try unreadable.write(to: file.url, atomically: true, encoding: .utf8)
+
+        let store = SessionStore(file: file)
+        #expect(store.load().windows.isEmpty)
+        #expect(try String(contentsOf: copy(of: file), encoding: .utf8) == unreadable)
+
+        store.save(snapshot("first tab"))
+        #expect(file.load() == snapshot("first tab"))
+        #expect(try String(contentsOf: copy(of: file), encoding: .utf8) == unreadable)
+    }
+    /// A later stage adding a required field reads as this, not as a typo.
+    @Test func aSessionMissingAFieldIsCopiedToo() throws {
+        let file = file()
+        let older = "{\"windows\":[{\"tabs\":[],\"activeIndex\":0}]}"
+        try older.write(to: file.url, atomically: true, encoding: .utf8)
+        #expect(SessionStore(file: file).load().windows.isEmpty)
+        #expect(try String(contentsOf: copy(of: file), encoding: .utf8) == older)
+    }
+    @Test func aNewCopyReplacesAnEarlierOne() throws {
+        let file = file()
+        try "earlier".write(to: copy(of: file), atomically: true, encoding: .utf8)
+        try "later".write(to: file.url, atomically: true, encoding: .utf8)
+        _ = SessionStore(file: file).load()
+        #expect(try String(contentsOf: copy(of: file), encoding: .utf8) == "later")
+    }
+    @Test func aMissingSessionLeavesNoCopy() {
+        let file = file()
+        #expect(SessionStore(file: file).load().windows.isEmpty)
+        #expect(!hasCopy(of: file))
+    }
+    @Test func aGoodSessionLeavesNoCopy() {
+        let file = file()
+        SessionStore(file: file).save(snapshot("x"))
+        #expect(SessionStore(file: file).load() == snapshot("x"))
+        #expect(!hasCopy(of: file))
+    }
+    /// With no copy, the file is the only place what it holds still exists.
+    @Test func aSessionThatCantBeCopiedIsNeverReplaced() throws {
+        let file = file()
+        let unreadable = "{\"windows\":"
+        try unreadable.write(to: file.url, atomically: true, encoding: .utf8)
+        try FileManager.default.createDirectory(at: copy(of: file).appending(path: "in the way"), withIntermediateDirectories: true)
+
+        let store = SessionStore(file: file)
+        #expect(store.load().windows.isEmpty)
+        store.save(snapshot("first tab"))
+        #expect(try String(contentsOf: file.url, encoding: .utf8) == unreadable)
+    }
+
+    // MARK: Holding saves during a restore
+
+    /// An exception out of a restore never reaches its end, and AppKit swallows it during launch, so this is the state it leaves.
+    @Test func nothingIsWrittenWhileARestoreRuns() {
+        let file = file()
+        SessionStore(file: file).save(snapshot("good"))
+        let store = SessionStore(file: file)
+        store.restore { session in
+            #expect(session == snapshot("good"))
+            store.save(snapshot("partial"))
+            store.save(empty)
+            #expect(file.load() == snapshot("good"))
+        }
+        store.save(snapshot("after"))
+        #expect(file.load() == snapshot("after"))
+    }
+}
+
+private final class Reached {
+    var value = false
 }
 
 /// `AppController` with a temporary profile. Its windows stay off screen, and tests set the key window themselves.
@@ -275,6 +354,20 @@ import Testing
         app.openWindow(restoring: window(page("a"), frame: ""))
         #expect(app.windows[1].window?.frame == app.windows[0].window?.frame)
     }
+    /// `setFrame(from:)` throws on a NaN in any field, and the file can hold anything.
+    @Test(arguments: [
+        "nan nan 900 640 0 0 3440 1410 ", "100 NaN 900 640 0 0 3440 1410 ", "100 100 nan 640 0 0 3440 1410 ",
+        "100 100 900 640 0 0 3440 -nan ", "nan nan nan nan", "inf 100 900 640 0 0 3440 1410 ",
+    ])
+    func aFrameThatIsntAllFiniteNumbersIsIgnored(frame: String) {
+        let app = makeApp()
+        let saved = page("saved")
+        app.openWindow(restoring: nil)
+        app.openWindow(restoring: window(saved, frame: frame))
+        #expect(app.windows.count == 2)
+        #expect(app.windows[1].tabs.list.records.map(\.id) == [saved.id])
+        #expect(app.windows[1].window?.frame == app.windows[0].window?.frame)
+    }
 
     // MARK: Launch
 
@@ -289,6 +382,35 @@ import Testing
         #expect(app.windows.count == 2)
         #expect(app.windows[0].tabs.list.activeID == active.id)
         #expect(app.windows.allSatisfy { $0.switcher.isHidden })
+    }
+    @Test func aBadFrameDoesntStopTheWindowsAfterIt() {
+        let profile = Profile.temporary()
+        let tabs = [page("first"), page("middle"), page("last")]
+        profile.session.save(SessionSnapshot(windows: [window(tabs[0]), window(tabs[1], frame: "nan nan 900 640 0 0 3440 1410 "), window(tabs[2])]))
+
+        let app = makeApp(profile)
+        app.restoreSession()
+        #expect(app.sessionSnapshot.windows.map { $0.tabs.map(\.id) } == tabs.map { [$0.id] })
+    }
+    /// A window taking its saved frame is a moment part way through a restore, with only some windows open.
+    @Test func aSavePartWayThroughARestoreIsHeld() throws {
+        let profile = Profile.temporary()
+        let saved = SessionSnapshot(windows: [window(page("a"), frame: "300 300 900 640 0 0 3440 1410 "), window(page("b"))])
+        profile.session.save(saved)
+        let app = makeApp(profile)
+        let reached = Reached()
+        let observer = NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: nil, queue: nil) { _ in
+            MainActor.assumeIsolated {
+                reached.value = true
+                profile.session.save(app.sessionSnapshot)
+            }
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        app.restoreSession()
+        #expect(reached.value)
+        #expect(app.windows.count == 2)
+        #expect(sessionFile(of: profile).load() == saved)
     }
     /// The same window a first launch shows, and what a session that failed to load falls back to.
     @Test func launchWithNothingSavedOpensAnEmptyWindowWithTheSwitcher() {
@@ -317,9 +439,12 @@ import Testing
         }
         try await Task.sleep(for: .milliseconds(700))
         #expect(try String(contentsOf: file.url, encoding: .utf8) == unreadable)
+        let copy = file.url.appendingPathExtension("unreadable")
+        #expect(try String(contentsOf: copy, encoding: .utf8) == unreadable)
 
         controller.tabs.newTab(nil, activate: true)
         #expect(await eventually { file.load()?.windows.count == 1 })
+        #expect(try String(contentsOf: copy, encoding: .utf8) == unreadable)
     }
     @Test func closingAnEmptyWindowLeavesAnUnreadSessionAlone() async throws {
         let profile = Profile.temporary()
@@ -413,6 +538,41 @@ import Testing
         #expect(app.windows.count == 2)
         #expect(!app.windows[1].switcher.isHidden)
         #expect(controller.switcher.isHidden)
+    }
+    /// Landing exactly on the window behind, a new window would look as if nothing had happened.
+    @Test func aNewWindowStepsAwayFromTheKeyWindow() throws {
+        let app = makeApp()
+        app.openWindow(restoring: window(page("a")))
+        let key = try #require(app.windows[0].window)
+        key.setFrame(NSRect(x: 300, y: 300, width: 900, height: 640), display: false)
+        let keyFrame = key.frame
+
+        app.perform(.newWindow, keyWindow: key)
+        let opened = try #require(app.windows[1].window)
+        #expect((1...60).contains(opened.frame.minX - keyFrame.minX))
+        #expect((1...60).contains(keyFrame.maxY - opened.frame.maxY))
+        #expect(key.frame == keyFrame)
+    }
+    @Test func theSwitchersNewWindowRowStepsAwayToo() throws {
+        let app = makeApp()
+        app.openWindow(restoring: window(page("a")))
+        app.windows[0].switcher.onChoose?(SwitcherRow(target: .command(.newWindow), title: "New Window", subtitle: "", section: "Commands"))
+        let opened = try #require(app.windows[1].window)
+        #expect(opened.frame.origin != app.windows[0].window?.frame.origin)
+    }
+    /// A restored window keeps its saved frame, whatever is open.
+    @Test func aRestoredWindowDoesntStepAway() throws {
+        let app = makeApp()
+        app.openWindow(restoring: window(page("a"), frame: "300 300 900 640 0 0 3440 1410 "))
+        let saved = try #require(app.windows[0].snapshot)
+        app.openWindow(restoring: saved)
+        #expect(app.windows[1].window?.frame == app.windows[0].window?.frame)
+    }
+    @Test func aNewWindowWithNothingToStepFromStaysCentered() throws {
+        let app = makeApp()
+        app.perform(.newWindow, keyWindow: nil)
+        let plain = WindowController(appearance: try #require(app.appearance), tabs: TabManager(profile: .temporary(), keepsSpare: false))
+        #expect(app.windows[0].window?.frame == plain.window?.frame)
     }
     @Test(arguments: [CommandID.openSwitcher, .openSwitcherFromPage, .newWindow])
     func withNoWindowTheseOpenOne(command: CommandID) {

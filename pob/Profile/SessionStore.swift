@@ -8,6 +8,9 @@ nonisolated struct WindowSnapshot: Codable, Equatable {
 
     /// nil when the index is out of range, which `TabList` takes as the first tab.
     var activeID: UUID? { tabs.indices.contains(activeIndex) ? tabs[activeIndex].id : nil }
+
+    /// `setFrame(from:)` throws on a NaN in any field, and this comes from a file that can hold anything.
+    var hasFiniteFrame: Bool { frame.split(separator: " ").allSatisfy { Double($0)?.isFinite == true } }
 }
 
 nonisolated struct SessionSnapshot: Codable, Equatable {
@@ -23,16 +26,34 @@ final class SessionStore {
     private var pendingSnapshot: (() -> SessionSnapshot)?
     /// With no tabs yet, an empty snapshot isn't the user emptying the session, and it could replace one that only failed to load.
     private var hasHadTabs = false
+    private var isRestoring = false
+    /// An unreadable file that couldn't be copied is the only place its tabs still exist.
+    private var mustKeepFile = false
 
     init(file: JSONFile<SessionSnapshot>) {
         self.file = file
     }
 
-    /// Empty when the file is missing or corrupt.
+    /// Empty when the file is missing or can't be read. One that can't be read is copied first, because the first tab
+    /// of a fresh session replaces it.
     func load() -> SessionSnapshot {
-        let snapshot = file.load() ?? SessionSnapshot(windows: [])
-        hasHadTabs = !snapshot.windows.isEmpty
-        return snapshot
+        do {
+            let snapshot = try file.read() ?? SessionSnapshot(windows: [])
+            hasHadTabs = !snapshot.windows.isEmpty
+            return snapshot
+        } catch {
+            NSLog("Can't read the session: %@", String(describing: error))
+            keepUnreadableFile()
+            return SessionSnapshot(windows: [])
+        }
+    }
+
+    /// Hands the session to `open` with saves held until it returns. An exception, which AppKit swallows during launch,
+    /// means it never does. The hold then stays on, so the windows that didn't open aren't saved away.
+    func restore(_ open: (SessionSnapshot) -> Void) {
+        isRestoring = true
+        open(load())
+        isRestoring = false
     }
 
     /// Returns with the snapshot on disk, after any write still running, so it's safe to call at quit.
@@ -58,8 +79,18 @@ final class SessionStore {
         }
     }
 
+    private func keepUnreadableFile() {
+        do {
+            try Data(contentsOf: file.url).write(to: file.url.appendingPathExtension("unreadable"), options: .atomic)
+        } catch {
+            NSLog("Can't copy the unreadable session, so nothing will replace it: %@", String(describing: error))
+            mustKeepFile = true
+        }
+    }
+
     /// The one way to the file. Without `@Sendable` the job takes the main actor's isolation: it builds clean, then crashes on the queue.
     private func writeJob(for snapshot: SessionSnapshot) -> DispatchWorkItem? {
+        guard !isRestoring, !mustKeepFile else { return nil }
         hasHadTabs = hasHadTabs || !snapshot.windows.isEmpty
         guard hasHadTabs else { return nil }
         return DispatchWorkItem { @Sendable [file] in

@@ -75,7 +75,36 @@ import Testing
         }
     }
 
-    private func keyDown(_ characters: String, keyCode: UInt16, _ modifiers: NSEvent.ModifierFlags) -> NSEvent {
+    /// A held key repeats until it's let go, so ⌘W would run through the tabs and on into the next window. Each repeat
+    /// has to be taken and not passed on, or the menu's key equivalent fires instead.
+    @Test func aHeldCloseClosesOnceAndTakesEveryRepeat() {
+        var received: [CommandID] = []
+        let recording = CommandList.standard { received.append($0) }
+        let closes: [(String, NSEvent.ModifierFlags, CommandID)] = [("w", .command, .closeTab), ("W", [.shift, .command], .closeWindow)]
+        for (key, modifiers, id) in closes {
+            received = []
+            #expect(recording.performReserved(keyDown(key, keyCode: 13, modifiers)))
+            for _ in 0..<3 {
+                #expect(recording.performReserved(keyDown(key, keyCode: 13, modifiers, isARepeat: true)))
+            }
+            #expect(received == [id])
+        }
+    }
+    @Test func otherReservedKeysKeepRepeating() {
+        var received: [CommandID] = []
+        let recording = CommandList.standard { received.append($0) }
+        #expect(recording.performReserved(keyDown("\t", keyCode: 48, .control, isARepeat: true)))
+        #expect(received == [.nextTab])
+    }
+    @Test func aKeyThatIsntReservedIsLeftAlone() {
+        var received: [CommandID] = []
+        let recording = CommandList.standard { received.append($0) }
+        #expect(!recording.performReserved(keyDown("b", keyCode: 11, .command)))
+        #expect(!recording.performReserved(keyDown("b", keyCode: 11, .command, isARepeat: true)))
+        #expect(received.isEmpty)
+    }
+
+    private func keyDown(_ characters: String, keyCode: UInt16, _ modifiers: NSEvent.ModifierFlags, isARepeat: Bool = false) -> NSEvent {
         NSEvent.keyEvent(
             with: .keyDown,
             location: .zero,
@@ -85,7 +114,7 @@ import Testing
             context: nil,
             characters: characters,
             charactersIgnoringModifiers: characters,
-            isARepeat: false,
+            isARepeat: isARepeat,
             keyCode: keyCode
         )!
     }

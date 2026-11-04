@@ -79,4 +79,14 @@ struct CommandList {
         guard let key = event.keyCode == 48 ? "\t" : event.charactersIgnoringModifiers?.lowercased() else { return nil }
         return reservedCommand(key: key, modifiers: event.modifierFlags.intersection([.command, .option, .shift, .control]))
     }
+
+    /// True when the key is taken and goes no further. A repeat of a close is taken and dropped, or a held ⌘W would run
+    /// through the tabs and on into the next window.
+    func performReserved(_ event: NSEvent) -> Bool {
+        guard let command = reservedCommand(for: event) else { return false }
+        if !event.isARepeat || ![.closeTab, .closeWindow].contains(command.id) {
+            command.perform()
+        }
+        return true
+    }
 }

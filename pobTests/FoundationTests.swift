@@ -27,6 +27,14 @@ import Testing
         try "not json".write(to: url, atomically: true, encoding: .utf8)
         #expect(JSONFile<[String]>(url: url).load() == nil)
     }
+    @Test func readingTellsAMissingFileFromAnUnreadableOne() throws {
+        let url = tempFile()
+        let file = JSONFile<[String]>(url: url)
+        #expect(try file.read() == nil)
+        try "not json".write(to: url, atomically: true, encoding: .utf8)
+        #expect(throws: (any Error).self) { try file.read() }
+        #expect(file.load() == nil)
+    }
     @Test func siteSettingsPersistPerHost() {
         let file = JSONFile<[String: SiteSetting]>(url: tempFile())
         let settings = SiteSettings(file: file)

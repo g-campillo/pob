@@ -5,8 +5,16 @@ nonisolated struct JSONFile<Value: Codable> {
 
     /// nil when the file is missing or unreadable.
     func load() -> Value? {
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        return try? JSONDecoder().decode(Value.self, from: data)
+        try? read()
+    }
+
+    /// nil when the file is missing. Throws when it's there but can't be read or decoded.
+    func read() throws -> Value? {
+        do {
+            return try JSONDecoder().decode(Value.self, from: Data(contentsOf: url))
+        } catch CocoaError.fileReadNoSuchFile {
+            return nil
+        }
     }
 
     func save(_ value: Value) throws {

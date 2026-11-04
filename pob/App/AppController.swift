@@ -80,22 +80,29 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     /// Opens the saved windows, or one empty window when there are none, as after a session that failed to load.
     func restoreSession() {
-        for window in profile?.session.load().windows ?? [] {
-            openWindow(restoring: window)
-        }
-        if windows.isEmpty {
-            openWindow(restoring: nil)
+        profile?.session.restore { session in
+            for window in session.windows {
+                openWindow(restoring: window)
+            }
+            if windows.isEmpty {
+                openWindow(restoring: nil)
+            }
         }
     }
 
-    func openWindow(restoring snapshot: WindowSnapshot?) {
+    /// A window opened from another steps away from it. Exactly on top, it would look as if nothing had happened.
+    func openWindow(restoring snapshot: WindowSnapshot?, cascadingFrom parent: NSWindow? = nil) {
         guard let profile, let appearance else { return }
         let controller = WindowController(appearance: appearance, tabs: TabManager(profile: profile, restoring: snapshot))
-        if let snapshot {
+        if let snapshot, snapshot.hasFiniteFrame {
             controller.window?.setFrame(from: snapshot.frame)
         }
+        if let parent, let window = controller.window {
+            let stepped = window.cascadeTopLeft(from: NSPoint(x: parent.frame.minX, y: parent.frame.maxY))
+            window.cascadeTopLeft(from: stepped)
+        }
         controller.onTabsChanged = { [weak self] in self?.saveSessionSoon() }
-        controller.onNewWindow = { [weak self] in self?.openWindow(restoring: nil) }
+        controller.onNewWindow = { [weak self, weak controller] in self?.openWindow(restoring: nil, cascadingFrom: controller?.window) }
         controller.onClose = { [weak self, weak controller] in
             self?.windows.removeAll { $0 === controller }
             self?.saveSessionSoon()
@@ -146,8 +153,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// Reserved shortcuts run here, before WebKit offers the key to the page.
     private func installReservedShortcuts() {
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, isBrowserWindowKey, let command = commands?.reservedCommand(for: event) else { return event }
-            command.perform()
+            guard let self, isBrowserWindowKey, commands?.performReserved(event) == true else { return event }
             return nil
         }
     }
