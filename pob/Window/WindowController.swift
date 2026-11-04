@@ -86,7 +86,8 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
             reportInspector(available: PrivateAPI.showPageSource(tab.webView))
         case .openInSafari:
             openInSafari()
-        default: break
+        case .signIn:
+            showSignInPopover()
         }
     }
 
@@ -223,6 +224,29 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
 
     private func showAppearancePopover() {
         showPopover(AppearancePopover(model: appearance), from: rail.settingsButton)
+    }
+
+    private func showSignInPopover() {
+        railState.pointerDwelledAtEdge()
+        applyRailState()
+        let host = tab.webView.url?.host() ?? "this site"
+        let popover = SignInPopover(host: host) { [weak self] username, password in
+            self?.fillLogin(username: username, password: password)
+        }
+        showPopover(popover, from: rail.addressField)
+    }
+
+    private func fillLogin(username: String, password: String) {
+        openPopover?.close()
+        Task { [weak self] in
+            guard let self else { return }
+            let filled = (try? await LoginFiller.fill(tab.webView, username: username, password: password)) ?? false
+            if !filled {
+                let alert = NSAlert()
+                alert.messageText = "No sign-in form was found on this page."
+                alert.present(in: window) { _ in }
+            }
+        }
     }
 
     private func showPopover(_ content: NSViewController, from anchor: NSView) {
