@@ -12,6 +12,7 @@ enum MainMenu {
         ))
         addSubmenu("Edit", to: menu, items: editItems())
         addSubmenu("View", to: menu, items: items(for: [.toggleRail, .snapOpaque], in: commands))
+        addSubmenu("Bookmarks", to: menu, items: items(for: [.bookmarkPage], in: commands))
         addSubmenu("Go", to: menu, items: items(
             for: [.back, .forward, .reload, .focusAddress, .openSwitcherFromPage],
             in: commands

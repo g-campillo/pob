@@ -2,7 +2,7 @@ import AppKit
 
 enum CommandID: String, CaseIterable {
     case toggleRail, focusAddress, reload, back, forward, snapOpaque
-    case toggleInspector, showConsole, showPageSource, openInSafari, signIn
+    case toggleInspector, showConsole, showPageSource, openInSafari, signIn, bookmarkPage
     case openSwitcher, openSwitcherFromPage, newWindow, reopenTab, closeTab, closeWindow, nextTab, previousTab
     case selectTab1, selectTab2, selectTab3, selectTab4, selectTab5, selectTab6, selectTab7, selectTab8, selectTab9
 }
@@ -45,6 +45,7 @@ struct CommandList {
             command(.showPageSource, "Page Source", key: "u", modifiers: [.option, .command]),
             command(.openInSafari, "Open in Safari"),
             command(.signIn, "Sign In with AutoFill"),
+            command(.bookmarkPage, "Bookmark This Page", key: "d", modifiers: .command),
             command(.openSwitcher, "New Tab", key: "t", modifiers: .command, reserved: true),
             command(.openSwitcherFromPage, "Open Switcher", key: "k", modifiers: .command),
             command(.newWindow, "New Window", key: "n", modifiers: .command, reserved: true),

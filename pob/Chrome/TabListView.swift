@@ -8,6 +8,7 @@ final class TabListView: NSView, NSTableViewDataSource, NSTableViewDelegate {
     var onNewTab: (() -> Void)?
     /// Fires after a reorder drag ends, so the rail can re-check whether the pointer left.
     var onDragEnd: (() -> Void)?
+    var favicons: FaviconStore?
     private(set) var isDragging = false
 
     private static let rowType = NSPasteboard.PasteboardType("com.pob.tab-row")
@@ -100,7 +101,9 @@ final class TabListView: NSView, NSTableViewDataSource, NSTableViewDelegate {
         let record = records[row]
         let view = tableView.makeView(withIdentifier: TabRow.identifier, owner: nil) as? TabRow ?? TabRow()
         view.identifier = TabRow.identifier
-        view.configure(title: Self.displayTitle(for: record), isActive: record.id == activeID)
+        let host = record.url?.host()
+        let title = Self.displayTitle(for: record)
+        view.configure(title: title, isActive: record.id == activeID, icon: host.flatMap { favicons?.image(forHost: $0) } ?? FaviconStore.letterTile(for: host ?? title, size: 18))
         view.onClose = { [weak self] in self?.onClose?(record.id) }
         return view
     }
@@ -150,7 +153,7 @@ private final class TabRow: NSView {
     var onClose: (() -> Void)?
 
     private let fill = ActiveFill()
-    private let tile = NSTextField(labelWithString: "")
+    private let tile = NSImageView()
     private let label = NSTextField(labelWithString: "")
     private let closeButton = NSButton()
 
@@ -159,11 +162,7 @@ private final class TabRow: NSView {
         fill.wantsLayer = true
         fill.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
 
-        tile.alignment = .center
-        tile.font = .systemFont(ofSize: 10, weight: .semibold)
-        tile.textColor = .white
-        tile.wantsLayer = true
-        tile.layer?.cornerRadius = 4
+        tile.imageScaling = .scaleProportionallyUpOrDown
 
         label.lineBreakMode = .byTruncatingTail
         label.font = .systemFont(ofSize: 13)
@@ -202,14 +201,11 @@ private final class TabRow: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
 
-    func configure(title: String, isActive: Bool) {
+    func configure(title: String, isActive: Bool, icon: NSImage) {
         label.stringValue = title
         label.textColor = isActive ? .labelColor : .secondaryLabelColor
         fill.isHidden = !isActive
-        let letter = title.first.map { String($0).uppercased() } ?? "?"
-        tile.stringValue = letter
-        let hue = CGFloat(title.unicodeScalars.reduce(0) { ($0 &* 31 &+ Int($1.value)) % 360 }) / 360
-        tile.layer?.backgroundColor = NSColor(hue: hue, saturation: 0.5, brightness: 0.65, alpha: 1).cgColor
+        tile.image = icon
         closeButton.alphaValue = 0
     }
 

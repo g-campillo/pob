@@ -44,6 +44,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
         connectTabs()
         setWindowButtonsVisible(false)
         appearance.addObserver { [weak self] in self?.applyAppearance() }
+        tabs.profile.bookmarks.addObserver { [weak self] in self?.updateRailContents() }
         showActiveTab()
         applyAppearance()
     }
@@ -121,6 +122,9 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
             openInSafari()
         case .signIn:
             showSignInPopover()
+        case .bookmarkPage:
+            guard let webView = tab?.webView, let url = webView.url, url.scheme != "about" else { return }
+            tabs.profile.bookmarks.toggle(url: url, title: webView.title?.isEmpty == false ? webView.title! : url.host() ?? url.absoluteString)
         }
     }
 
@@ -235,7 +239,21 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
         }
     }
 
+    /// A bookmark opens in the current tab, or in a new one when the window has none.
+    func openBookmark(_ bookmark: Bookmark) {
+        if let tab {
+            tab.load(.url(bookmark.url))
+        } else {
+            tabs.newTab(.url(bookmark.url), activate: true)
+        }
+    }
+
     private func connectTabs() {
+        let bookmarks = tabs.profile.bookmarks
+        rail.pinned.onOpen = { [weak self] in self?.openBookmark($0) }
+        rail.pinned.onUnpin = { bookmarks.setPinned(false, id: $0) }
+        rail.pinned.onRemove = { bookmarks.remove(id: $0) }
+        rail.tabList.favicons = tabs.profile.favicons
         rail.tabList.onSelect = { [weak self] in self?.tabs.activate($0) }
         rail.tabList.onClose = { [weak self] in self?.tabs.close($0) }
         rail.tabList.onMove = { [weak self] in self?.tabs.move(from: $0, to: $1) }
@@ -276,6 +294,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
     private func updateRailContents() {
         let webView = tab?.webView
         rail.update(url: webView?.url, canGoBack: webView?.canGoBack ?? false, canGoForward: webView?.canGoForward ?? false)
+        rail.update(pinned: tabs.profile.bookmarks.pinned, favicons: tabs.profile.favicons)
         rail.tabList.update(records: tabs.list.records, activeID: tabs.list.activeID)
     }
 

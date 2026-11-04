@@ -15,6 +15,7 @@ final class Rail: NSView, NSTextFieldDelegate {
 
     let addressField: NSTextField = AddressField()
     let tabList = TabListView()
+    let pinned = PinnedBookmarksView()
     private(set) lazy var settingsButton = iconButton("gearshape", label: "Settings", action: #selector(settingsPressed))
 
     private lazy var backButton = iconButton("chevron.left", label: "Back", action: #selector(backPressed))
@@ -36,6 +37,11 @@ final class Rail: NSView, NSTextFieldDelegate {
         forwardButton.isEnabled = canGoForward
         guard addressField.currentEditor() == nil else { return }
         addressField.stringValue = url?.scheme == "about" ? "" : url?.absoluteString ?? ""
+    }
+
+    func update(pinned bookmarks: [Bookmark], favicons: FaviconStore) {
+        pinned.update(bookmarks: bookmarks, favicons: favicons)
+        pinned.isHidden = bookmarks.isEmpty // a hidden row takes no space in the stack
     }
 
     override func updateTrackingAreas() {
@@ -134,12 +140,15 @@ final class Rail: NSView, NSTextFieldDelegate {
         let bottomRow = NSStackView(views: [bottomSpacer, settingsButton])
         bottomRow.orientation = .horizontal
 
-        let stack = NSStackView(views: [topRow, addressRow, tabList, bottomRow])
+        pinned.translatesAutoresizingMaskIntoConstraints = false
+        pinned.isHidden = true
+
+        let stack = NSStackView(views: [topRow, addressRow, pinned, tabList, bottomRow])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
-        for row in [topRow, addressRow, tabList, bottomRow] {
+        for row in [topRow, addressRow, pinned, tabList, bottomRow] {
             row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         return stack
@@ -199,4 +208,62 @@ private final class AddressField: NSTextField {
         }
         return accepted
     }
+}
+
+/// Pinned bookmarks as icons that wrap onto new rows. They sit on glass, so they stay plain buttons.
+final class PinnedBookmarksView: NSView {
+    var onOpen: ((Bookmark) -> Void)?
+    var onUnpin: ((UUID) -> Void)?
+    var onRemove: ((UUID) -> Void)?
+
+    private static let columns = 7 // fits the rail's fixed width
+    private static let cell: CGFloat = 28
+    private static let gap: CGFloat = 4
+    private var bookmarks: [Bookmark] = []
+
+    override var isFlipped: Bool { true }
+
+    override var intrinsicContentSize: NSSize {
+        let rows = (bookmarks.count + Self.columns - 1) / Self.columns
+        return NSSize(width: NSView.noIntrinsicMetric, height: rows == 0 ? 0 : CGFloat(rows) * (Self.cell + Self.gap) - Self.gap)
+    }
+
+    func update(bookmarks: [Bookmark], favicons: FaviconStore) {
+        self.bookmarks = bookmarks
+        subviews.forEach { $0.removeFromSuperview() }
+        for (index, bookmark) in bookmarks.enumerated() {
+            let host = bookmark.url.host() ?? bookmark.title
+            let icon = (bookmark.url.host().flatMap(favicons.image(forHost:))) ?? FaviconStore.letterTile(for: host, size: 20)
+            icon.size = NSSize(width: 20, height: 20)
+            let button = NSButton(image: icon, target: self, action: #selector(pressed(_:)))
+            button.isBordered = false
+            button.refusesFirstResponder = true
+            button.tag = index
+            button.toolTip = bookmark.title
+            button.setAccessibilityLabel(bookmark.title)
+            let menu = NSMenu()
+            for (title, action) in [("Unpin", #selector(unpin(_:))), ("Remove", #selector(remove(_:)))] {
+                let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+                item.target = self
+                item.tag = index
+                menu.addItem(item)
+            }
+            button.menu = menu
+            addSubview(button)
+        }
+        invalidateIntrinsicContentSize()
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        for (index, button) in subviews.enumerated() {
+            let step = Self.cell + Self.gap
+            button.frame = NSRect(x: CGFloat(index % Self.columns) * step, y: CGFloat(index / Self.columns) * step, width: Self.cell, height: Self.cell)
+        }
+    }
+
+    @objc private func pressed(_ sender: NSButton) { onOpen?(bookmarks[sender.tag]) }
+    @objc private func unpin(_ sender: NSMenuItem) { onUnpin?(bookmarks[sender.tag].id) }
+    @objc private func remove(_ sender: NSMenuItem) { onRemove?(bookmarks[sender.tag].id) }
 }

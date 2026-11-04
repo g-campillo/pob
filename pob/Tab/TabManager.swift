@@ -101,6 +101,7 @@ final class TabManager {
         tab.onLoadFinished = { [weak self, weak tab] in
             if let tab {
                 self?.recordVisit(of: tab)
+                self?.refreshFavicon(of: tab)
                 self?.onLoadFinished?(tab)
             }
         }
@@ -121,6 +122,15 @@ final class TabManager {
     private func recordVisit(of tab: Tab) {
         guard let url = tab.webView.url, Self.isRecordable(url) else { return }
         Task { [history = profile.history, title = tab.title] in await history.record(url: url, title: title) }
+    }
+
+    private func refreshFavicon(of tab: Tab) {
+        guard let url = tab.webView.url, Self.isRecordable(url), let host = url.host() else { return }
+        Task { [weak self, weak tab] in
+            guard let self, let webView = tab?.webView else { return }
+            await profile.favicons.update(host: host, from: webView)
+            onChange?()
+        }
     }
 
     /// A finished sign-in reads as a bug if it lands on an unrelated tab, so an active popup hands back to its opener.
