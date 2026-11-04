@@ -32,14 +32,14 @@ enum SwitcherModel {
 
         // Each page shows once, in the first section that has it: Return should find an open tab before opening it again.
         var listed = Set(shownTabs.compactMap(\.url))
+        if case .url(let url) = input, listed.insert(url).inserted {
+            rows.append(SwitcherRow(target: .address(input), title: url.absoluteString, subtitle: "Open Address", section: ""))
+        }
         let shownBookmarks = bookmarks.filter {
             !listed.contains($0.url) && (matches($0.title) || matches($0.url.absoluteString))
         }.prefix(bookmarkLimit)
         listed.formUnion(shownBookmarks.map(\.url))
 
-        if case .url(let url) = input {
-            rows.append(SwitcherRow(target: .address(input), title: url.absoluteString, subtitle: "Open Address", section: ""))
-        }
         rows += shownBookmarks.map {
             SwitcherRow(target: .url($0.url), title: $0.title, subtitle: $0.url.absoluteString, section: "Bookmarks")
         }
@@ -53,5 +53,14 @@ enum SwitcherModel {
             rows.append(SwitcherRow(target: .address(input), title: text, subtitle: "Search Google", section: ""))
         }
         return rows
+    }
+
+    /// What's left of the last answer once the text has changed, for the moment before history answers again.
+    static func stillMatching(_ history: [HistoryEntry], query: String) -> [HistoryEntry] {
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return [] }
+        return history.filter {
+            $0.title.localizedCaseInsensitiveContains(text) || $0.url.absoluteString.localizedCaseInsensitiveContains(text)
+        }
     }
 }

@@ -4,6 +4,8 @@ import AppKit
 final class Rail: NSView, NSTextFieldDelegate {
     static let width: CGFloat = 240
     static let inset: CGFloat = 8
+    /// What the rail takes from the window's left side, with a margin on each side of it.
+    static let footprint = width + 2 * inset
 
     var onSubmit: ((String) -> Void)?
     var onCancel: (() -> Void)?
@@ -237,7 +239,29 @@ extension NSView {
     }
 }
 
-private final class AddressField: NSTextField {
+/// For addresses and searches, which must stay as typed, so `--` doesn't turn into a dash.
+class LiteralTextField: NSTextField {
+    override class var cellClass: AnyClass? {
+        get { LiteralTextFieldCell.self }
+        set {}
+    }
+}
+
+/// This runs however editing starts. `selectText(_:)` never reaches the field's `becomeFirstResponder`.
+private final class LiteralTextFieldCell: NSTextFieldCell {
+    override func setUpFieldEditorAttributes(_ textObj: NSText) -> NSText {
+        let text = super.setUpFieldEditorAttributes(textObj)
+        if let editor = text as? NSTextView {
+            editor.isAutomaticSpellingCorrectionEnabled = false
+            editor.isAutomaticTextReplacementEnabled = false
+            editor.isAutomaticQuoteSubstitutionEnabled = false
+            editor.isAutomaticDashSubstitutionEnabled = false
+        }
+        return text
+    }
+}
+
+private final class AddressField: LiteralTextField {
     var onFocus: (() -> Void)?
 
     override func becomeFirstResponder() -> Bool {

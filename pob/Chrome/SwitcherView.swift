@@ -11,9 +11,17 @@ final class SwitcherView: NSView, NSTextFieldDelegate {
     var onCancel: (() -> Void)?
     var onQueryChange: ((String) -> Void)?
 
-    let field = NSTextField()
+    let field: NSTextField = LiteralTextField()
     let list = SwitcherList(selectsFirstRow: true)
     private let listHeight: NSLayoutConstraint
+    private let pageArea = NSLayoutGuide()
+    private lazy var pageLeading = pageArea.leadingAnchor.constraint(equalTo: leadingAnchor)
+
+    /// Where the page starts. The panel centers on the page and sizes from it, so it never reaches the rail.
+    var pageInset: CGFloat {
+        get { pageLeading.constant }
+        set { pageLeading.constant = newValue }
+    }
 
     override init(frame: NSRect) {
         listHeight = list.heightAnchor.constraint(equalToConstant: 0)
@@ -27,6 +35,7 @@ final class SwitcherView: NSView, NSTextFieldDelegate {
         dimming.addGestureRecognizer(NSClickGestureRecognizer(target: self, action: #selector(dimmingClicked)))
         addSubview(dimming)
 
+        addLayoutGuide(pageArea)
         let panel = NSView()
         panel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(panel)
@@ -55,8 +64,10 @@ final class SwitcherView: NSView, NSTextFieldDelegate {
         NSLayoutConstraint.activate([
             topLine,
             listHeight,
-            panel.centerXAnchor.constraint(equalTo: centerXAnchor),
-            panel.widthAnchor.constraint(equalTo: widthAnchor, multiplier: 0.56),
+            pageLeading,
+            pageArea.trailingAnchor.constraint(equalTo: trailingAnchor),
+            panel.centerXAnchor.constraint(equalTo: pageArea.centerXAnchor),
+            panel.widthAnchor.constraint(equalTo: pageArea.widthAnchor, multiplier: 0.56),
             panel.topAnchor.constraint(greaterThanOrEqualTo: topAnchor, constant: 16),
             panel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -16),
             field.topAnchor.constraint(equalTo: content.topAnchor, constant: 14),
@@ -81,6 +92,8 @@ final class SwitcherView: NSView, NSTextFieldDelegate {
     }
 
     func show(rows: [SwitcherRow]) {
+        // With nothing typed the rows are just there to browse, so none is marked until the arrows pick one.
+        list.selectsFirstRow = AddressInput.classify(field.stringValue) != nil
         list.show(rows)
         listHeight.constant = min(list.contentHeight, Self.maxListHeight)
     }
@@ -101,6 +114,8 @@ final class SwitcherView: NSView, NSTextFieldDelegate {
         case #selector(NSResponder.insertNewline(_:)):
             if let row = list.selection {
                 onChoose?(row)
+            } else if !list.rows.isEmpty { // with no rows the window is empty, and closing would leave nothing on screen
+                onCancel?()
             }
         case #selector(NSResponder.cancelOperation(_:)):
             onCancel?()
@@ -133,8 +148,9 @@ final class SwitcherList: NSView, NSTableViewDataSource, NSTableViewDelegate {
     }
 
     var onChoose: ((SwitcherRow) -> Void)?
+    /// When on, Return always has a row to choose. When off, nothing's marked until the arrows pick a row.
+    var selectsFirstRow: Bool
 
-    private let selectsFirstRow: Bool
     private let table = ClickOnlyTable()
     private var items: [Item] = []
     /// The row the arrows landed on, kept when history reloads the list around it.
@@ -150,7 +166,6 @@ final class SwitcherList: NSView, NSTableViewDataSource, NSTableViewDelegate {
         items.reduce(0) { $0 + height(of: $1) + table.intercellSpacing.height }
     }
 
-    /// With `selectsFirstRow`, Return always has a row to choose. Without it, the typed text counts until the arrows pick one.
     init(selectsFirstRow: Bool) {
         self.selectsFirstRow = selectsFirstRow
         super.init(frame: .zero)

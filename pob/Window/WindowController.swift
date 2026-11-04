@@ -23,6 +23,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
     private var railCloseTask: Task<Void, Never>?
     private(set) var openPopover: NSPopover?
     private var historySearch: Task<Void, Never>?
+    private var shownHistory: [HistoryEntry] = []
     private lazy var commands = CommandList.standard { [weak self] in self?.perform($0) }
 
     init(appearance: AppearanceModel, tabs: TabManager) {
@@ -73,9 +74,11 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
     }
 
     func perform(_ id: CommandID) {
-        // Commands act on the window, and several of them move the keyboard, so the panel can't stay up over them.
-        if id != .openSwitcher, id != .openSwitcherFromPage {
+        if !switcher.isHidden, id != .openSwitcher, id != .openSwitcherFromPage {
+            // Commands act on the window, and several of them move the keyboard, so the panel can't stay up over them.
             closeSwitcher()
+            // ⌘T says New Tab, so ⌘T then ⌘W means "never mind", not "close the page behind it".
+            if id == .closeTab { return }
         }
         switch id {
         case .back: tab?.webView.goBack()
@@ -148,6 +151,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
         let isVisible = railState.visibility != .hidden
         setWindowButtonsVisible(isVisible)
         applyPageStyle()
+        switcher.pageInset = isVisible ? Rail.footprint : 0
 
         if isVisible {
             rail.isHidden = false
@@ -307,7 +311,6 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
     }
 
     private func closeSwitcher() {
-        guard !switcher.isHidden else { return }
         window?.makeFirstResponder(tab?.webView)
         switcher.isHidden = true
     }
@@ -326,14 +329,17 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
         suggest(query) { [weak self] in self?.switcher.show(rows: $0) }
     }
 
-    /// Everything but history shows at once, and history joins it when it answers.
-    /// Each search cancels the one before, so a late answer for old text is dropped.
+    /// Everything but history shows at once. History the last answer found stays while it still matches, so the list
+    /// holds still between keys, until the next answer replaces it. Each search cancels the one before, so a late
+    /// answer for old text is dropped.
     private func suggest(_ query: String, show: @escaping ([SwitcherRow]) -> Void) {
         historySearch?.cancel()
-        show(rows(for: query, history: []))
+        shownHistory = SwitcherModel.stillMatching(shownHistory, query: query)
+        show(rows(for: query, history: shownHistory))
         historySearch = Task { [weak self, searchHistory] in
             let history = await searchHistory(query)
-            guard !Task.isCancelled, !history.isEmpty, let self else { return }
+            guard !Task.isCancelled, let self, history != shownHistory else { return }
+            shownHistory = history
             show(rows(for: query, history: history))
         }
     }
@@ -384,7 +390,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
     private func applyPageStyle() {
         guard let webView = tab?.webView else { return }
         webView.alphaValue = appearance.effective.pageAlpha
-        webView.obscuredContentInsets.left = railState.visibility == .pinned ? Rail.width + 2 * Rail.inset : 0
+        webView.obscuredContentInsets.left = railState.visibility == .pinned ? Rail.footprint : 0
     }
 
     private func updateRailContents() {
