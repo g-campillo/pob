@@ -3,7 +3,6 @@ import AppKit
 /// A small glass pill at the bottom left. It names the page's host for a moment after a load, and clicking it copies the address.
 final class DomainPill: NSView {
     static let visibleDuration: Duration = .seconds(2)
-    private static let copiedDuration: Duration = .seconds(1)
     private static let fadeDuration: TimeInterval = 0.2
 
     /// Punycode, so lookalike hosts stand out. `URL.host()` would percent-encode a raw international host instead.
@@ -20,6 +19,11 @@ final class DomainPill: NSView {
     }
     /// The page's address. A notice never changes it.
     private(set) var currentURL: URL?
+
+    /// Replaceable so tests needn't wait out the real times.
+    var visibleFor = DomainPill.visibleDuration
+    var copiedFor: Duration = .seconds(1)
+    var pasteboard = NSPasteboard.general
 
     private let label = NSTextField(labelWithString: "")
     private var hideTask: Task<Void, Never>?
@@ -68,12 +72,12 @@ final class DomainPill: NSView {
     func show(url: URL?) {
         currentURL = url
         guard let host = Self.displayHost(for: url) else { return hide(animated: false) }
-        present(host, for: Self.visibleDuration)
+        present(host, for: visibleFor)
     }
 
     /// Shows text for the same time, such as a download's filename. The page's address stays as it was.
     func showNotice(_ text: String) {
-        present(text, for: Self.visibleDuration)
+        present(text, for: visibleFor)
     }
 
     func copyURL(to pasteboard: NSPasteboard) {
@@ -84,19 +88,19 @@ final class DomainPill: NSView {
 
     // MARK: Showing and hiding
 
-    private func present(_ text: String, for duration: Duration) {
+    private func present(_ text: String, for duration: Duration, holdsOnHover: Bool = true) {
         guard !isSuppressed else { return hide(animated: false) }
         fadeGeneration += 1
         label.stringValue = text
         alphaValue = 1
         isHidden = false
-        scheduleHide(after: duration)
+        scheduleHide(after: duration, holdsOnHover: holdsOnHover)
     }
 
     /// Hovering holds the pill, so the clock only runs while the pointer is outside it.
-    private func scheduleHide(after duration: Duration) {
+    private func scheduleHide(after duration: Duration, holdsOnHover: Bool = true) {
         hideTask?.cancel()
-        guard !isHovered else { return }
+        guard !(isHovered && holdsOnHover) else { return }
         hideTask = Task { [weak self] in
             try? await Task.sleep(for: duration)
             guard !Task.isCancelled else { return }
@@ -110,6 +114,7 @@ final class DomainPill: NSView {
         let generation = fadeGeneration
         guard animated, !isHidden, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
             isHidden = true
+            isHovered = false // a hidden view gets no mouseExited
             return
         }
         NSAnimationContext.runAnimationGroup { context in
@@ -120,6 +125,7 @@ final class DomainPill: NSView {
                 // A new show in the meantime owns the pill.
                 guard let self, self.fadeGeneration == generation else { return }
                 self.isHidden = true
+                self.isHovered = false
             }
         }
     }
@@ -134,8 +140,9 @@ final class DomainPill: NSView {
 
     override func mouseDown(with event: NSEvent) {
         guard currentURL != nil else { return }
-        copyURL(to: .general)
-        present("Copied", for: Self.copiedDuration)
+        copyURL(to: pasteboard)
+        // The pointer is inside by definition, so this one fades regardless of hover.
+        present("Copied", for: copiedFor, holdsOnHover: false)
     }
 
     override func updateTrackingAreas() {
@@ -160,7 +167,7 @@ final class DomainPill: NSView {
     override func mouseExited(with event: NSEvent) {
         isHovered = false
         if !isHidden {
-            scheduleHide(after: Self.visibleDuration)
+            scheduleHide(after: visibleFor)
         }
     }
 }

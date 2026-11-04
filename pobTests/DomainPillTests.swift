@@ -65,6 +65,34 @@ import Testing
         pill.showNotice("a.zip")
         #expect(pill.currentURL == url)
     }
+    private func event(_ type: NSEvent.EventType) -> NSEvent {
+        switch type {
+        case .leftMouseDown:
+            NSEvent.mouseEvent(with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+        default:
+            NSEvent.enterExitEvent(with: type, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil)!
+        }
+    }
+    @Test func copiedFadesAfterItsTimeEvenWithThePointerInside() async {
+        let pill = DomainPill(frame: .zero)
+        pill.pasteboard = NSPasteboard(name: NSPasteboard.Name(UUID().uuidString))
+        pill.copiedFor = .milliseconds(50)
+        pill.show(url: URL(string: "https://example.com"))
+        pill.mouseEntered(with: event(.mouseEntered))
+        pill.mouseDown(with: event(.leftMouseDown))
+        #expect(!pill.isHidden)
+        #expect(await eventually { pill.isHidden })
+    }
+    @Test func hoverDoesNotStickAfterThePillIsHiddenUnderThePointer() async {
+        let pill = DomainPill(frame: .zero)
+        pill.visibleFor = .milliseconds(50)
+        pill.show(url: URL(string: "https://example.com"))
+        pill.mouseEntered(with: event(.mouseEntered))
+        pill.isSuppressed = true
+        pill.isSuppressed = false
+        pill.show(url: URL(string: "https://example.com"))
+        #expect(await eventually { pill.isHidden })
+    }
     @Test func theLoadingLineNeverTakesClicks() {
         let line = LoadingLine(frame: NSRect(x: 0, y: 0, width: 100, height: 2))
         line.update(progress: 0.5, isLoading: true)
