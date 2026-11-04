@@ -25,7 +25,7 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsMagnification = true
         webView.underPageBackgroundColor = .clear
-        PrivateAPI.makeBackgroundClear(webView)
+        PrivateAPI.setDrawsBackground(webView, false)
 
         super.init()
 
@@ -59,6 +59,11 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     // MARK: WKNavigationDelegate
+
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        // Only the blank page shows the desktop. Pages with no background of their own get a normal one.
+        PrivateAPI.setDrawsBackground(webView, webView.url?.scheme != "about")
+    }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         onLoadFinished?()

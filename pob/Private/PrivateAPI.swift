@@ -21,8 +21,12 @@ enum PrivateAPI {
         return setRadius(connection, window.windowNumber, Int32(radius)) == 0
     }
 
-    static func makeBackgroundClear(_ webView: WKWebView) {
-        webView.setValue(false, forKey: "drawsBackground")
+    static func setDrawsBackground(_ webView: WKWebView, _ draws: Bool) {
+        webView.setValue(draws, forKey: "drawsBackground")
+    }
+
+    static func drawsBackground(_ webView: WKWebView) -> Bool {
+        webView.value(forKey: "drawsBackground") as? Bool ?? true
     }
 
     static func enableDeveloperExtras(_ configuration: WKWebViewConfiguration) {
