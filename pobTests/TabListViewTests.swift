@@ -36,4 +36,32 @@ import Testing
         #expect(await eventually { tabs.list.active?.title == "Hello" })
         #expect(tabs.list.active?.url?.host() == "localhost")
     }
+
+    @Test func dropsFromAnotherWindowAreRefused() {
+        let view = TabListView(frame: NSRect(x: 0, y: 0, width: 220, height: 300))
+        let ours = NSTableView()
+        let theirs = NSTableView()
+        #expect(view.tableView(ours, validateDrop: FakeDrag(source: theirs), proposedRow: 0, proposedDropOperation: .above) == [])
+        #expect(view.tableView(ours, validateDrop: FakeDrag(source: ours), proposedRow: 0, proposedDropOperation: .above) == .move)
+    }
+}
+
+private final class FakeDrag: NSObject, NSDraggingInfo {
+    let source: Any?
+    init(source: Any?) { self.source = source }
+    var draggingDestinationWindow: NSWindow? { nil }
+    var draggingSourceOperationMask: NSDragOperation { .move }
+    var draggingLocation: NSPoint { .zero }
+    var draggedImageLocation: NSPoint { .zero }
+    var draggedImage: NSImage? { nil }
+    var draggingPasteboard: NSPasteboard { NSPasteboard(name: .drag) }
+    var draggingSource: Any? { source }
+    var draggingSequenceNumber: Int { 0 }
+    var draggingFormation: NSDraggingFormation = .default
+    var animatesToDestination = false
+    var numberOfValidItemsForDrop = 1
+    func slideDraggedImage(to screenPoint: NSPoint) {}
+    func enumerateDraggingItems(options enumOpts: NSDraggingItemEnumerationOptions = [], for view: NSView?, classes classArray: [AnyClass], searchOptions: [NSPasteboard.ReadingOptionKey: Any] = [:], using block: @escaping (NSDraggingItem, Int, UnsafeMutablePointer<ObjCBool>) -> Void) {}
+    var springLoadingHighlight: NSSpringLoadingHighlight { .none }
+    func resetSpringLoading() {}
 }

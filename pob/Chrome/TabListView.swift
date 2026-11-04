@@ -121,6 +121,8 @@ final class TabListView: NSView, NSTableViewDataSource, NSTableViewDelegate {
     }
 
     func tableView(_ tableView: NSTableView, validateDrop info: any NSDraggingInfo, proposedRow row: Int, proposedDropOperation dropOperation: NSTableView.DropOperation) -> NSDragOperation {
+        // Another window's rail registers the same type, and its row index means nothing here.
+        guard info.draggingSource as AnyObject === tableView else { return [] }
         tableView.setDropRow(row, dropOperation: .above)
         return .move
     }
