@@ -3,12 +3,17 @@ import WebKit
 
 final class WindowController: NSWindowController {
     let tab: Tab
+    let rail = Rail()
     private(set) var usesFallbackBlur = false
+    private(set) var railState = RailState()
 
     private let appearance: AppearanceModel
     private let contentView = NSView()
     private var blurGate = BlurGate()
     private var fallbackBlurView: NSVisualEffectView?
+    private let edgeStrip = EdgeStrip()
+    private var railLeading: NSLayoutConstraint?
+    private var railCloseTask: Task<Void, Never>?
 
     init(appearance: AppearanceModel, tab: Tab) {
         self.appearance = appearance
@@ -30,6 +35,7 @@ final class WindowController: NSWindowController {
         super.init(window: window)
 
         buildContent(in: window)
+        connectRail()
         setWindowButtonsVisible(false)
         appearance.onChange = { [weak self] in self?.applyAppearance() }
         applyAppearance()
@@ -57,7 +63,38 @@ final class WindowController: NSWindowController {
         case .reload: tab.webView.reload()
         case .snapOpaque: appearance.toggleSnap()
         case .closeWindow: window?.performClose(nil)
+        case .toggleRail:
+            railState.toggleShortcut()
+            if railState.visibility == .hidden {
+                window?.makeFirstResponder(tab.webView)
+            }
+            applyRailState()
+        case .focusAddress:
+            railState.beginEditingAddress()
+            applyRailState()
+            rail.addressField.selectText(nil)
         default: break
+        }
+    }
+
+    func applyRailState() {
+        let isVisible = railState.visibility != .hidden
+        setWindowButtonsVisible(isVisible)
+        tab.webView.obscuredContentInsets.left = railState.visibility == .pinned ? Rail.width + 2 * Rail.inset : 0
+
+        if isVisible {
+            rail.isHidden = false
+        }
+        let reduceMotion = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = reduceMotion ? 0 : 0.17
+            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            railLeading?.animator().constant = isVisible ? Rail.inset : -(Rail.width + Rail.inset)
+        } completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.railState.visibility == .hidden else { return }
+                self.rail.isHidden = true
+            }
         }
     }
 
@@ -83,6 +120,81 @@ final class WindowController: NSWindowController {
         ))
         strip.autoresizingMask = [.width, .minYMargin]
         contentView.addSubview(strip)
+
+        rail.translatesAutoresizingMaskIntoConstraints = false
+        rail.isHidden = true
+        contentView.addSubview(rail)
+        let leading = rail.leadingAnchor.constraint(
+            equalTo: contentView.leadingAnchor,
+            constant: -(Rail.width + Rail.inset)
+        )
+        railLeading = leading
+        NSLayoutConstraint.activate([
+            leading,
+            rail.widthAnchor.constraint(equalToConstant: Rail.width),
+            rail.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Rail.inset),
+            rail.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Rail.inset),
+        ])
+
+        edgeStrip.frame = NSRect(x: 0, y: 0, width: EdgeStrip.width, height: contentView.bounds.height)
+        edgeStrip.autoresizingMask = [.height]
+        contentView.addSubview(edgeStrip)
+    }
+
+    private func connectRail() {
+        edgeStrip.onDwell = { [weak self] in
+            guard let self else { return }
+            railCloseTask?.cancel()
+            railState.pointerDwelledAtEdge()
+            applyRailState()
+        }
+        edgeStrip.onExit = { [weak self] in self?.scheduleRailClose() }
+        rail.onPointerExit = { [weak self] in self?.scheduleRailClose() }
+        rail.onNavigate = { [weak self] in self?.perform($0) }
+        rail.onAddressFocus = { [weak self] in
+            guard let self else { return }
+            railState.beginEditingAddress()
+            applyRailState()
+        }
+        rail.onAddressEndEditing = { [weak self] in
+            guard let self else { return }
+            railState.endEditingAddress(pointerInsideRail: isPointerOverRail)
+            applyRailState()
+        }
+        rail.onSubmit = { [weak self] text in
+            guard let self else { return }
+            if let input = AddressInput.classify(text) {
+                tab.load(input)
+            }
+            window?.makeFirstResponder(tab.webView)
+        }
+        rail.onCancel = { [weak self] in
+            guard let self else { return }
+            updateRailContents()
+            window?.makeFirstResponder(tab.webView)
+        }
+        tab.onStateChange = { [weak self] in self?.updateRailContents() }
+    }
+
+    private func updateRailContents() {
+        rail.update(url: tab.webView.url, canGoBack: tab.webView.canGoBack, canGoForward: tab.webView.canGoForward)
+    }
+
+    /// The rail closes shortly after the pointer leaves, unless it comes back or is still over the rail.
+    private func scheduleRailClose() {
+        railCloseTask?.cancel()
+        railCloseTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(140))
+            guard !Task.isCancelled, let self, !isPointerOverRail else { return }
+            railState.pointerLeftRail()
+            applyRailState()
+        }
+    }
+
+    private var isPointerOverRail: Bool {
+        guard let window else { return false }
+        let point = contentView.convert(window.mouseLocationOutsideOfEventStream, from: nil)
+        return contentView.bounds.contains(point) && point.x <= rail.frame.maxX
     }
 
     private func installFallbackBlur() {
