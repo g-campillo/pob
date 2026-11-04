@@ -46,7 +46,7 @@ enum PrivateAPI {
     }
 
     static func showConsole(_ webView: WKWebView) -> Bool {
-        performOnInspector("showConsole", of: webView)
+        performOnInspector("showConsole", of: webView) && performOnInspector("attach", of: webView)
     }
 
     static func showPageSource(_ webView: WKWebView) -> Bool {
@@ -55,6 +55,7 @@ enum PrivateAPI {
               let frame = webView.perform(mainFrame)?.takeUnretainedValue()
         else { return false }
         return performOnInspector("showMainResourceForFrame:", of: webView, with: frame)
+            && performOnInspector("attach", of: webView)
     }
 
     static func missingSelectors(on webView: WKWebView) -> [String] {

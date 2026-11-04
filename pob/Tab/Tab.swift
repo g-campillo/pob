@@ -34,6 +34,12 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
         observeState()
     }
 
+    /// The page to hand to Safari, or nil when there's nothing worth opening.
+    var safariURL: URL? {
+        guard let url = webView.url, url.scheme != "about" else { return nil }
+        return url
+    }
+
     func load(_ input: AddressInput) {
         switch input {
         case .url(let url), .search(let url):

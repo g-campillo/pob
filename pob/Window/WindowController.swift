@@ -74,6 +74,18 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
             railState.beginEditingAddress()
             applyRailState()
             rail.addressField.selectText(nil)
+        case .toggleInspector:
+            let webView = tab.webView
+            let opened = PrivateAPI.isInspectorVisible(webView)
+                ? PrivateAPI.closeInspector(webView)
+                : PrivateAPI.showInspector(webView)
+            reportInspector(available: opened)
+        case .showConsole:
+            reportInspector(available: PrivateAPI.showConsole(tab.webView))
+        case .showPageSource:
+            reportInspector(available: PrivateAPI.showPageSource(tab.webView))
+        case .openInSafari:
+            openInSafari()
         default: break
         }
     }
@@ -191,6 +203,22 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
             railState.pointerLeftRail()
             applyRailState()
         }
+    }
+
+    private func reportInspector(available: Bool) {
+        guard !available else { return }
+        let alert = NSAlert()
+        alert.messageText = "Web Inspector isn't available in the window. Open this page in Safari's Develop menu instead."
+        alert.present(in: window) { _ in }
+    }
+
+    private func openInSafari() {
+        guard let url = tab.safariURL else { return }
+        NSWorkspace.shared.open(
+            [url],
+            withApplicationAt: URL(fileURLWithPath: "/Applications/Safari.app"),
+            configuration: NSWorkspace.OpenConfiguration()
+        )
     }
 
     private func showAppearancePopover() {
