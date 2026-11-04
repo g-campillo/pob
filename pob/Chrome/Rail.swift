@@ -14,6 +14,7 @@ final class Rail: NSView, NSTextFieldDelegate {
     var onPointerExit: (() -> Void)?
 
     let addressField: NSTextField = AddressField()
+    let tabList = TabListView()
     private(set) lazy var settingsButton = iconButton("gearshape", label: "Settings", action: #selector(settingsPressed))
 
     private lazy var backButton = iconButton("chevron.left", label: "Back", action: #selector(backPressed))
@@ -24,6 +25,7 @@ final class Rail: NSView, NSTextFieldDelegate {
     override init(frame: NSRect) {
         super.init(frame: frame)
         buildGlass()
+        tabList.onDragEnd = { [weak self] in self?.onPointerExit?() }
     }
 
     @available(*, unavailable)
@@ -51,6 +53,7 @@ final class Rail: NSView, NSTextFieldDelegate {
     }
 
     override func mouseExited(with event: NSEvent) {
+        guard !tabList.isDragging else { return }
         onPointerExit?()
     }
 
@@ -121,20 +124,22 @@ final class Rail: NSView, NSTextFieldDelegate {
 
         let addressRow = makeAddressRow()
 
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.init(1), for: .vertical)
+        // The list is the part that shrinks and scrolls when the window is short.
+        tabList.translatesAutoresizingMaskIntoConstraints = false
+        tabList.setContentHuggingPriority(.init(1), for: .vertical)
+        tabList.setContentCompressionResistancePriority(.init(1), for: .vertical)
 
         let bottomSpacer = NSView()
         bottomSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let bottomRow = NSStackView(views: [bottomSpacer, settingsButton])
         bottomRow.orientation = .horizontal
 
-        let stack = NSStackView(views: [topRow, addressRow, spacer, bottomRow])
+        let stack = NSStackView(views: [topRow, addressRow, tabList, bottomRow])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
-        for row in [topRow, addressRow, bottomRow] {
+        for row in [topRow, addressRow, tabList, bottomRow] {
             row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         return stack

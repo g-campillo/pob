@@ -236,6 +236,10 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
     }
 
     private func connectTabs() {
+        rail.tabList.onSelect = { [weak self] in self?.tabs.activate($0) }
+        rail.tabList.onClose = { [weak self] in self?.tabs.close($0) }
+        rail.tabList.onMove = { [weak self] in self?.tabs.move(from: $0, to: $1) }
+        rail.tabList.onNewTab = { [weak self] in self?.perform(.openSwitcher) }
         tabs.onChange = { [weak self] in self?.updateRailContents() }
         tabs.onActiveChange = { [weak self] in
             guard let self else { return }
@@ -272,6 +276,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
     private func updateRailContents() {
         let webView = tab?.webView
         rail.update(url: webView?.url, canGoBack: webView?.canGoBack ?? false, canGoForward: webView?.canGoForward ?? false)
+        rail.tabList.update(records: tabs.list.records, activeID: tabs.list.activeID)
     }
 
     /// The rail closes shortly after the pointer leaves, unless it comes back or is still over the rail.

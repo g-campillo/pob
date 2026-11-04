@@ -85,7 +85,14 @@ final class TabManager {
         lastActive[id] = .now
         setPhase(.background, of: id)
 
-        tab.onStateChange = { [weak self] in self?.onChange?() }
+        tab.onStateChange = { [weak self, weak tab] in
+            guard let self, let tab else { return }
+            list.update(id) { record in
+                record.url = tab.webView.url ?? record.url
+                record.title = tab.title.isEmpty ? record.title : tab.title
+            }
+            onChange?()
+        }
         tab.onLoadFinished = { [weak self, weak tab] in
             if let tab {
                 self?.onLoadFinished?(tab)

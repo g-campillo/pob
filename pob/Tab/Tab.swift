@@ -6,6 +6,7 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
     let webView: WKWebView
     /// WebKit docks the inspector beside the page, so the two share this view to leave the window together.
     let pageView = NSView()
+    var title: String { webView.title ?? "" }
     var onLoadFinished: (() -> Void)?
     var onStateChange: (() -> Void)?
     var onOpenLink: ((URLRequest, _ activate: Bool) -> Void)?
@@ -67,6 +68,7 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
     private func observeState() {
         observations = [
             webView.observe(\.url) { [weak self] _, _ in self?.stateChanged() },
+            webView.observe(\.title) { [weak self] _, _ in self?.stateChanged() },
             webView.observe(\.canGoBack) { [weak self] _, _ in self?.stateChanged() },
             webView.observe(\.canGoForward) { [weak self] _, _ in self?.stateChanged() },
         ]
