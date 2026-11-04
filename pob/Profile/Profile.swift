@@ -10,6 +10,8 @@ final class Profile {
 
     lazy var siteSettings = SiteSettings(file: JSONFile(url: directory.appending(path: "sites.json")))
 
+    lazy var history = HistoryStore(file: directory.appending(path: "history.sqlite"))
+
     /// Built ahead of time, so a new tab doesn't wait for a web view.
     private(set) var spareTab: Tab?
 

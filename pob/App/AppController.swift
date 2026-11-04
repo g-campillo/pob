@@ -29,6 +29,8 @@ final class AppController: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard !Self.isRunningTests else { return }
 
+        Task { await Profile.initial.history.prune(before: Date().addingTimeInterval(-365 * 86_400)) }
+
         let appearance = AppearanceModel(
             store: SettingsStore(fileURL: SettingsStore.defaultFileURL),
             reduceTransparency: NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency

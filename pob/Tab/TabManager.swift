@@ -16,6 +16,7 @@ final class TabManager {
     private var phases: [UUID: TabPhase] = [:]
     private var lastActive: [UUID: Date] = [:]
     private var openers: [UUID: UUID] = [:]
+    private var recordedTitles: [UUID: String] = [:]
 
     init(profile: Profile, keepsSpare: Bool = true) {
         self.profile = profile
@@ -92,9 +93,14 @@ final class TabManager {
                 record.title = tab.title.isEmpty ? record.title : tab.title
             }
             onChange?()
+            if let url = tab.webView.url, Self.isRecordable(url), !tab.title.isEmpty, recordedTitles[id] != tab.title {
+                recordedTitles[id] = tab.title
+                Task { [history = profile.history, title = tab.title] in await history.updateTitle(url: url, title: title) }
+            }
         }
         tab.onLoadFinished = { [weak self, weak tab] in
             if let tab {
+                self?.recordVisit(of: tab)
                 self?.onLoadFinished?(tab)
             }
         }
@@ -108,6 +114,13 @@ final class TabManager {
             return popup.webView
         }
         tab.onCloseRequested = { [weak self] in self?.closeFromPage(id) }
+    }
+
+    private static func isRecordable(_ url: URL) -> Bool { url.scheme == "http" || url.scheme == "https" }
+
+    private func recordVisit(of tab: Tab) {
+        guard let url = tab.webView.url, Self.isRecordable(url) else { return }
+        Task { [history = profile.history, title = tab.title] in await history.record(url: url, title: title) }
     }
 
     /// A finished sign-in reads as a bug if it lands on an unrelated tab, so an active popup hands back to its opener.
@@ -161,6 +174,7 @@ final class TabManager {
         tab.pageView.removeFromSuperview()
         phases[id] = nil
         lastActive[id] = nil
+        recordedTitles[id] = nil
     }
 
     private func setPhase(_ phase: TabPhase, of id: UUID) {
