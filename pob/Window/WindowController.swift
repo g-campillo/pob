@@ -4,6 +4,7 @@ import WebKit
 final class WindowController: NSWindowController, NSPopoverDelegate {
     let tab: Tab
     let rail = Rail()
+    let backdrop = BackdropView()
     private(set) var usesFallbackBlur = false
     private(set) var railState = RailState()
 
@@ -49,6 +50,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
         guard let window else { return }
         let effective = appearance.effective
         tab.webView.alphaValue = effective.pageAlpha
+        backdrop.alphaValue = effective.pageAlpha < 1 ? 0.25 : 1
 
         if !PrivateAPI.setWindowBlur(window, radius: blurGate.radiusToSend(effective.blurRadius)) {
             installFallbackBlur()
@@ -137,6 +139,11 @@ final class WindowController: NSWindowController, NSPopoverDelegate {
 
     private func buildContent(in window: NSWindow) {
         window.contentView = contentView
+
+        backdrop.wantsLayer = true
+        backdrop.frame = contentView.bounds
+        backdrop.autoresizingMask = [.width, .height]
+        contentView.addSubview(backdrop)
 
         let webView = tab.webView
         webView.frame = contentView.bounds

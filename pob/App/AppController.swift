@@ -43,6 +43,7 @@ final class AppController: NSObject, NSApplicationDelegate {
 
         windowController.showWindow(nil)
         NSApp.activate()
+        windowController.perform(.focusAddress)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

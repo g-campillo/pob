@@ -44,4 +44,13 @@ import Testing
         #expect(controller.windowToClose(keyWindow: popup) === popup)
         #expect(controller.windowToClose(keyWindow: nil) === controller.window)
     }
+
+    /// With nothing on screen and no page yet, a fully clear window can't be seen at all.
+    @Test func blankWindowIsVisibleAndSnappingMakesItSolid() {
+        let (controller, model) = make()
+        #expect(controller.backdrop.alphaValue == 0.25)
+        #expect(controller.backdrop.superview?.subviews.first === controller.backdrop)
+        model.toggleSnap()
+        #expect(controller.backdrop.alphaValue == 1)
+    }
 }
