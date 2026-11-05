@@ -65,7 +65,7 @@ final class FindBar: NSView, NSTextFieldDelegate {
         switch selector {
         case #selector(NSResponder.insertNewline(_:)), #selector(NSResponder.insertLineBreak(_:)):
             let backwards = NSApp.currentEvent?.modifierFlags.contains(.shift) == true
-            onSearch?(field.stringValue, backwards)
+            if !field.stringValue.isEmpty { onSearch?(field.stringValue, backwards) }
             return true
         case #selector(NSResponder.cancelOperation(_:)):
             onClose?()

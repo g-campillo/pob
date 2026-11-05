@@ -161,13 +161,36 @@ import WebKit
 
     @Test func findOpensTheBarAndAHiddenBarCatchesNoClicks() throws {
         let controller = makeWindow()
+        let window = try #require(controller.window)
         let bar = controller.findBar
+        window.contentView?.layoutSubtreeIfNeeded()
+        #expect(!bar.frame.isEmpty)
+        let point = NSPoint(x: bar.frame.midX, y: bar.frame.midY) // in the superview, where hitTest looks
         #expect(bar.isHidden)
-        #expect(bar.hitTest(NSPoint(x: 5, y: 5)) == nil)
+        #expect(bar.hitTest(point) == nil)
         controller.perform(.find)
         #expect(!bar.isHidden)
-        controller.perform(.find) // again refocuses
-        #expect(!bar.isHidden)
+        #expect(bar.hitTest(point) != nil)
+    }
+    @Test func findAgainRefocusesTheBarAndSelectsItsText() throws {
+        let controller = makeWindow()
+        let window = try #require(controller.window)
+        let bar = controller.findBar
+        controller.perform(.find)
+        bar.field.stringValue = "needle"
+        #expect(window.makeFirstResponder(controller.tab?.webView))
+        #expect(bar.field.currentEditor() == nil)
+        controller.perform(.find)
+        let editor = try #require(bar.field.currentEditor())
+        #expect(window.firstResponder === editor)
+        #expect(editor.selectedRange == NSRange(location: 0, length: 6))
+    }
+    @Test func returnOnEmptyTextSearchesNothing() {
+        let bar = FindBar()
+        var searched = false
+        bar.onSearch = { _, _ in searched = true }
+        #expect(bar.control(bar.field, textView: NSTextView(), doCommandBy: #selector(NSResponder.insertNewline(_:))))
+        #expect(!searched)
     }
     @Test func escapeReturnsTheKeyboardToThePage() throws {
         let controller = makeWindow()
