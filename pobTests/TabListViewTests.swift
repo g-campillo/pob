@@ -62,6 +62,7 @@ import Testing
         let view = TabListView(frame: NSRect(x: 0, y: 0, width: 220, height: 300))
         view.favicons = favicons
         view.update(records: records, activeID: active)
+        view.layoutSubtreeIfNeeded() // puts real rows up, so an update has them to touch
         return view
     }
 
@@ -89,18 +90,27 @@ import Testing
         #expect(after[0] === rows[0] && after[1] === rows[1])
         #expect(closeButton(of: after[1])?.alphaValue == 1)
     }
+    /// A window that's never shown, because only a real pass over the table recycles rows. A row that leaves mid-hover never hears the pointer go.
     @Test func aRecycledRowDoesntKeepTheHover() throws {
-        var records = [TabRecord(title: "One")]
+        let records = (0..<40).map { TabRecord(title: "Tab \($0)") }
         let view = listShowing(records, active: records[0].id)
-        closeButton(of: try #require(rowViews(in: view).first))?.alphaValue = 1
-        records.append(TabRecord(title: "Two"))
-        view.update(records: records, activeID: records[0].id)
-        #expect(try rowViews(in: view).compactMap { closeButton(of: $0)?.alphaValue } == [0, 0])
+        let window = NSWindow(contentRect: view.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        window.contentView = view
+        window.displayIfNeeded()
+        let table = try table(in: view)
+        let hovered = try #require(table.view(atColumn: 0, row: 0, makeIfNecessary: false))
+        closeButton(of: hovered)?.alphaValue = 1
+
+        table.scrollRowToVisible(39)
+        window.displayIfNeeded()
+        let shown = table.rows(in: table.visibleRect)
+        let rows = (shown.lowerBound..<shown.upperBound).compactMap { table.view(atColumn: 0, row: $0, makeIfNecessary: false) }
+        #expect(rows.contains { $0 === hovered })
+        #expect(rows.allSatisfy { closeButton(of: $0)?.alphaValue == 0 })
     }
     @Test func theListScrollsOnlyWhenTheActiveTabChanges() throws {
         var records = (0..<40).map { TabRecord(title: "Tab \($0)") }
         let view = listShowing(records, active: records[0].id)
-        view.layoutSubtreeIfNeeded()
         let table = try table(in: view)
         table.scrollRowToVisible(39)
         let scrolled = table.visibleRect
@@ -123,11 +133,18 @@ import Testing
         let records = [TabRecord(title: "One"), TabRecord(title: "Two")]
         let view = listShowing(records, active: records[0].id)
         view.update(records: records.reversed(), activeID: records[0].id)
-        #expect(try rowViews(in: view).map { title(of: $0) } == ["Two", "One"])
-        var clicked: UUID?
-        view.onSelect = { clicked = $0 }
+        let rows = try rowViews(in: view)
+        #expect(rows.map { title(of: $0) } == ["Two", "One"])
+
+        var selected: UUID?
+        view.onSelect = { selected = $0 }
         view.selectRow(0)
-        #expect(clicked == records[1].id)
+        #expect(selected == records[1].id)
+
+        var closed: UUID? // each row holds its tab's close, so an update in place would close the wrong tab
+        view.onClose = { closed = $0 }
+        closeButton(of: rows[0])?.performClick(nil)
+        #expect(closed == records[1].id)
     }
     /// The title and address stay the same, so only the icon itself can say the row is out of date.
     @Test func aFaviconArrivingRefreshesItsRow() throws {
