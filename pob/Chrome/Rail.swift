@@ -287,6 +287,7 @@ final class PinnedBookmarksView: NSView {
     private static let cell: CGFloat = 28
     private static let gap: CGFloat = 4
     private var bookmarks: [Bookmark] = []
+    private var favicons: [NSImage?] = []
 
     override var isFlipped: Bool { true }
 
@@ -295,12 +296,15 @@ final class PinnedBookmarksView: NSView {
         return NSSize(width: NSView.noIntrinsicMetric, height: rows == 0 ? 0 : CGFloat(rows) * (Self.cell + Self.gap) - Self.gap)
     }
 
-    func update(bookmarks: [Bookmark], favicons: FaviconStore) {
+    /// Every change to any tab lands here, and a button rebuilt between press and release never fires.
+    func update(bookmarks: [Bookmark], favicons store: FaviconStore) {
+        let favicons = bookmarks.map { $0.url.host().flatMap(store.image(forHost:)) }
+        guard bookmarks != self.bookmarks || favicons != self.favicons else { return }
         self.bookmarks = bookmarks
+        self.favicons = favicons
         subviews.forEach { $0.removeFromSuperview() }
         for (index, bookmark) in bookmarks.enumerated() {
-            let host = bookmark.url.host() ?? bookmark.title
-            let icon = (bookmark.url.host().flatMap(favicons.image(forHost:))) ?? FaviconStore.letterTile(for: host, size: 20)
+            let icon = favicons[index] ?? FaviconStore.letterTile(for: bookmark.url.host() ?? bookmark.title, size: 20)
             icon.size = NSSize(width: 20, height: 20)
             let button = NSButton(image: icon, target: self, action: #selector(pressed(_:)))
             button.isBordered = false

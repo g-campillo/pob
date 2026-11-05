@@ -390,6 +390,30 @@ import WebKit
         }
     }
 
+    /// Nothing about the tab or the bookmark changes when an icon lands, so this is what the rail's guards could lose.
+    @Test func aPagesIconReachesItsRowAndItsPinnedBookmark() async throws {
+        let (controller, _) = make()
+        let tab = try #require(controller.tab)
+        let address = URL(string: "https://localhost/icon")!
+        let bookmarks = controller.tabs.profile.bookmarks
+        bookmarks.toggle(url: address, title: "Icon")
+        bookmarks.setPinned(true, id: try #require(bookmarks.all.first).id)
+        let favicons = controller.tabs.profile.favicons
+        #expect(favicons.image(forHost: "localhost") == nil)
+
+        let page = "<title>Icon</title><link rel=\"icon\" href=\"data:image/png;base64,\(tinyPNG)\">"
+        await finishLoading(tab) { tab.webView.loadSimulatedRequest(URLRequest(url: address), responseHTML: page) }
+        #expect(await eventually { favicons.image(forHost: "localhost") != nil })
+
+        let icon = try #require(favicons.image(forHost: "localhost"))
+        let table = try #require(controller.rail.tabList.subviewsDeep.compactMap { $0 as? NSTableView }.first)
+        #expect(await eventually {
+            let row = table.view(atColumn: 0, row: 0, makeIfNecessary: true)
+            return row?.subviews.contains { ($0 as? NSImageView)?.image === icon } == true
+                && (controller.rail.pinned.subviews.first as? NSButton)?.image === icon
+        })
+    }
+
     private func backButton(in controller: WindowController) -> NSButton? {
         controller.rail.subviewsDeep.compactMap { $0 as? NSButton }.first { $0.accessibilityLabel() == "Back" }
     }

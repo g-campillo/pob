@@ -1,5 +1,16 @@
 import AppKit
 
+/// All a row shows, so comparing two says whether it needs touching. The icon counts, because one can arrive on its own.
+private struct ShownTab: Equatable {
+    let id: UUID
+    let title: String
+    let isActive: Bool
+    let host: String?
+    let favicon: NSImage?
+
+    var icon: NSImage { favicon ?? FaviconStore.letterTile(for: host ?? title, size: 18) }
+}
+
 /// The rail's tab rows and its New Tab row. Rows sit on glass, so they use fills, never more glass.
 final class TabListView: NSView, NSTableViewDataSource, NSTableViewDelegate {
     var onSelect: ((UUID) -> Void)?
@@ -13,10 +24,9 @@ final class TabListView: NSView, NSTableViewDataSource, NSTableViewDelegate {
 
     private static let rowType = NSPasteboard.PasteboardType("com.pob.tab-row")
     private let table = ClickOnlyTable()
-    private var records: [TabRecord] = []
-    private var activeID: UUID?
+    private var rows: [ShownTab] = []
 
-    var rowCount: Int { records.count }
+    var rowCount: Int { rows.count }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -70,19 +80,33 @@ final class TabListView: NSView, NSTableViewDataSource, NSTableViewDelegate {
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
 
+    /// Every change to any tab lands here, so it touches only what changed. A reload would drop the hover, and a scroll the reader's place.
     func update(records: [TabRecord], activeID: UUID?) {
-        self.records = records
-        self.activeID = activeID
-        table.reloadData()
-        if let activeID, let row = records.firstIndex(where: { $0.id == activeID }) {
+        let previous = rows
+        rows = records.map { record in
+            let host = record.url?.host()
+            return ShownTab(
+                id: record.id, title: Self.displayTitle(for: record), isActive: record.id == activeID,
+                host: host, favicon: host.flatMap { favicons?.image(forHost: $0) }
+            )
+        }
+        if rows.map(\.id) != previous.map(\.id) {
+            table.reloadData()
+        } else {
+            for index in rows.indices where rows[index] != previous[index] {
+                // A row out of view has no view yet, and gets this when it comes in.
+                (table.view(atColumn: 0, row: index, makeIfNecessary: false) as? TabRow)?.configure(rows[index])
+            }
+        }
+        if previous.first(where: \.isActive)?.id != activeID, let row = rows.firstIndex(where: \.isActive) {
             table.scrollRowToVisible(row)
         }
     }
 
     /// Takes the same path as a click.
     func selectRow(_ index: Int) {
-        guard records.indices.contains(index) else { return }
-        onSelect?(records[index].id)
+        guard rows.indices.contains(index) else { return }
+        onSelect?(rows[index].id)
     }
 
     static func displayTitle(for record: TabRecord) -> String {
@@ -95,16 +119,14 @@ final class TabListView: NSView, NSTableViewDataSource, NSTableViewDelegate {
 
     // MARK: NSTableViewDataSource and NSTableViewDelegate
 
-    func numberOfRows(in tableView: NSTableView) -> Int { records.count }
+    func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let record = records[row]
+        let tab = rows[row]
         let view = tableView.makeView(withIdentifier: TabRow.identifier, owner: nil) as? TabRow ?? TabRow()
         view.identifier = TabRow.identifier
-        let host = record.url?.host()
-        let title = Self.displayTitle(for: record)
-        view.configure(title: title, isActive: record.id == activeID, icon: host.flatMap { favicons?.image(forHost: $0) } ?? FaviconStore.letterTile(for: host ?? title, size: 18))
-        view.onClose = { [weak self] in self?.onClose?(record.id) }
+        view.configure(tab)
+        view.onClose = { [weak self] in self?.onClose?(tab.id) }
         return view
     }
 
@@ -206,11 +228,16 @@ private final class TabRow: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
 
-    func configure(title: String, isActive: Bool, icon: NSImage) {
-        label.stringValue = title
-        label.textColor = isActive ? .labelColor : .secondaryLabelColor
-        fill.isHidden = !isActive
-        tile.image = icon
+    func configure(_ tab: ShownTab) {
+        label.stringValue = tab.title
+        label.textColor = tab.isActive ? .labelColor : .secondaryLabelColor
+        fill.isHidden = !tab.isActive
+        tile.image = tab.icon
+    }
+
+    /// Not in `configure`, which also runs on the row the pointer may be on.
+    override func prepareForReuse() {
+        super.prepareForReuse()
         closeButton.alphaValue = 0
     }
 

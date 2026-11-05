@@ -21,6 +21,13 @@ func tabWith(html: String) async -> Tab {
     return tab
 }
 
+/// A one-pixel PNG, as the page's icon or as what `FaviconStore` keeps on disk.
+let tinyPNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNg+P8fAAADAQH/VcGg6AAAAABJRU5ErkJggg=="
+
+func writeIcon(forHost host: String, in folder: URL) throws {
+    try Data(base64Encoded: tinyPNG)?.write(to: folder.appending(path: FaviconStore.fileName(forHost: host)))
+}
+
 /// Polls for up to a second.
 func eventually(_ condition: () async -> Bool) async -> Bool {
     for _ in 0..<100 {
