@@ -397,7 +397,7 @@ import WebKit
 
 /// `WKNavigationAction` can't be built by hand, and its `dealloc` crashes on an instance WebKit
 /// didn't make, so every fake is kept for the life of the test process.
-private final class FakeNavigationAction: WKNavigationAction {
+final class FakeNavigationAction: WKNavigationAction {
     private let url: URL
     private let type: WKNavigationType
     private let modifiers: NSEvent.ModifierFlags
@@ -422,7 +422,7 @@ private final class FakeNavigationAction: WKNavigationAction {
 }
 
 /// Kept for the same reason as `FakeNavigationAction`.
-private final class FakeMainFrame: WKFrameInfo {
+final class FakeMainFrame: WKFrameInfo {
     override init() {
         super.init()
         _ = Unmanaged.passRetained(self)
@@ -431,7 +431,7 @@ private final class FakeMainFrame: WKFrameInfo {
 }
 
 /// Kept for the same reason as `FakeNavigationAction`.
-private func keptWindowFeatures() -> WKWindowFeatures {
+func keptWindowFeatures() -> WKWindowFeatures {
     let features = WKWindowFeatures()
     _ = Unmanaged.passRetained(features)
     return features

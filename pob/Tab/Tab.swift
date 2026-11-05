@@ -27,6 +27,10 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
     var deviceAccess: (PermissionKind) -> Bool = { Permissions.macOSAllows($0) }
     /// Replaceable so a test can't open System Settings.
     var openSettings: @MainActor (URL) -> Void = { NSWorkspace.shared.open($0) }
+    /// Replaceable so a test can't open a real app.
+    var openInApp: @MainActor (URL) -> Void = { NSWorkspace.shared.open($0) }
+    /// Replaceable so tests don't depend on what's installed on this Mac.
+    var appToOpen: (URL) -> URL? = { NSWorkspace.shared.urlForApplication(toOpen: $0) }
     /// The main-frame address last going ahead, which is what a no-window refusal has to retry and what a certificate question has to be about.
     var mainFrameURL: URL?
     /// Set when a certificate question was refused only because the tab had no window. The manager loads it on activation.
@@ -36,6 +40,7 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
     /// Back-forward items that hold an error page, which WebKit restores from its cache as if they were real pages.
     private var errorItems: [WKBackForwardListItem?] = []
     private var arrivedByHistory = false
+    private var isOfferingToOpen = false
     /// Replaceable so a test can make the evaluation refuse to start. The block runs on the main queue.
     var evaluateTrust: (SecTrust, @escaping @Sendable (Bool) -> Void) -> OSStatus = { trust, done in
         SecTrustEvaluateAsyncWithError(trust, .main) { _, valid, _ in done(valid) }
@@ -164,7 +169,10 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
         decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
     ) {
         arrivedByHistory = navigationAction.navigationType == .backForward
-        if navigationAction.navigationType == .linkActivated, navigationAction.modifierFlags.contains(.command) {
+        if let link = linkForAnotherApp(navigationAction) {
+            decisionHandler(.cancel)
+            offerToOpen(link)
+        } else if navigationAction.navigationType == .linkActivated, navigationAction.modifierFlags.contains(.command) {
             onOpenLink?(navigationAction.request, false)
             decisionHandler(.cancel)
         } else if isShowingErrorPage, navigationAction.navigationType == .linkActivated, navigationAction.request.url == webView.url {
@@ -368,6 +376,29 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
         }
     }
 
+    /// The address, if it's one for another app. WebKit fails those with an error that's hidden, so the link would do nothing.
+    private func linkForAnotherApp(_ action: WKNavigationAction) -> URL? {
+        guard let url = action.request.url, let scheme = url.scheme, !WKWebView.handlesURLScheme(scheme),
+              webView.configuration.urlSchemeHandler(forURLScheme: scheme) == nil else { return nil }
+        return url
+    }
+
+    /// A page can do this with no click, so it always asks. One sheet at a time, and what arrives while it's up is dropped.
+    private func offerToOpen(_ link: URL) {
+        guard !isOfferingToOpen, let app = appToOpen(link) else { return }
+        isOfferingToOpen = true
+        let alert = NSAlert()
+        alert.messageText = "Open this link in \(app.deletingPathExtension().lastPathComponent)?"
+        // The committed page, because during a redirect `webView.url` holds the target, and the sender picks that.
+        alert.informativeText = webView.backForwardList.currentItem?.url.host().map { "This link comes from \($0)." } ?? ""
+        alert.addButton(withTitle: "Open")
+        alert.addButton(withTitle: "Cancel")
+        present(alert) { [weak self] response in
+            self?.isOfferingToOpen = false
+            if response == .alertFirstButtonReturn { self?.openInApp(link) }
+        }
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         onLoadFinished?()
     }
@@ -380,6 +411,11 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
         for navigationAction: WKNavigationAction,
         windowFeatures: WKWindowFeatures
     ) -> WKWebView? {
+        // `window.open` skips the policy call above, and a popup would be left behind as a blank tab.
+        if let link = linkForAnotherApp(navigationAction) {
+            offerToOpen(link)
+            return nil
+        }
         if navigationAction.modifierFlags.contains(.command) {
             onOpenLink?(navigationAction.request, false)
             return nil

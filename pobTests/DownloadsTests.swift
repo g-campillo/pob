@@ -10,6 +10,7 @@ final class LocalServer {
         case body(Data, headers: [String: String] = [:])
         /// Promises `length` bytes (none promised when nil), sends `sent`, then stays silent until `dropConnections()`.
         case stall(sent: Data, length: Int?)
+        case redirect(to: String)
     }
 
     var routes: [String: Reply] = [:]
@@ -78,6 +79,10 @@ final class LocalServer {
             for (key, value) in headers { head += "\(key): \(value)\r\n" }
             head += "Content-Length: \(body.count)\r\n\r\n"
             connection.send(content: Data(head.utf8) + body, completion: .contentProcessed { _ in
+                MainActor.assumeIsolated { self.close(connection) }
+            })
+        case .redirect(let target)?:
+            connection.send(content: Data("HTTP/1.1 302 Found\r\nLocation: \(target)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8), completion: .contentProcessed { _ in
                 MainActor.assumeIsolated { self.close(connection) }
             })
         case .stall(let sent, let length)?:
