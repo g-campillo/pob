@@ -153,4 +153,20 @@ import Testing
         }
         #expect(tab.isShowingErrorPage)
     }
+    @Test(.timeLimit(.minutes(1))) func goingBackToAPageThatRetryFixedLoadsItFromCache() async throws {
+        let file = FileManager.default.temporaryDirectory.appending(path: "pob-retry-\(UUID().uuidString).html")
+        defer { try? FileManager.default.removeItem(at: file) }
+        let tab = Tab(profile: .temporary())
+        await finishLoading(tab) { tab.webView.load(URLRequest(url: URL(string: "about:blank")!)) }
+        let error = URLError(.cannotConnectToHost, userInfo: [NSURLErrorFailingURLErrorKey: file])
+        await finishLoading(tab) { tab.webView(tab.webView, didFailProvisionalNavigation: nil, withError: error) }
+        #expect(tab.isShowingErrorPage)
+        try "<p>fixed</p>".write(to: file, atomically: true, encoding: .utf8)
+        await finishLoading(tab) { tab.webView.loadFileURL(file, allowingReadAccessTo: file.deletingLastPathComponent()) }
+        #expect(!tab.isShowingErrorPage)
+        await finishLoading(tab) { tab.webView.load(URLRequest(url: URL(string: "about:blank")!)) }
+        await finishLoading(tab) { tab.webView.goBack() }
+        try? await Task.sleep(for: .milliseconds(300))
+        #expect(!tab.isShowingErrorPage)
+    }
 }

@@ -107,6 +107,75 @@ private func fields(of alert: NSAlert) -> [NSTextField] { alert.accessoryView?.s
         #expect(tab.retryURL == nil)
         #expect(tab.webView.isLoading)
     }
+    @Test(.timeLimit(.minutes(1))) func aPasswordChallengeWithNoWindowIsRetriedWhenTheTabIsActivated() async {
+        let tabs = TabManager(profile: .temporary(), keepsSpare: false)
+        tabs.newTab(nil, activate: true)
+        let tab = tabs.newTab(nil, activate: false)
+        let id = tabs.list.records[1].id
+        let address = URL(string: "http://localhost:1/private")!
+        tab.mainFrameURL = address
+        #expect(await answer(tab, passwordChallenge(host: "localhost", realm: nil)).disposition == .cancelAuthenticationChallenge)
+        #expect(tab.retryURL == address)
+        tabs.activate(id)
+        #expect(tab.retryURL == nil)
+        #expect(tab.webView.isLoading)
+    }
+    @Test(.timeLimit(.minutes(1))) func aRefusalForAnotherHostIsNotRetried() async {
+        let tab = Tab(profile: .temporary())
+        tab.mainFrameURL = URL(string: "https://localhost/")!
+        _ = await answer(tab, badCertificate(host: "other.example"))
+        #expect(tab.retryURL == nil)
+    }
+    @Test(.timeLimit(.minutes(1))) func aTabThatMovedOnIsNotPulledBackToTheRefusedAddress() async {
+        let tab = Tab(profile: .temporary())
+        tab.retryURL = URL(string: "https://localhost/old")!
+        await finishLoading(tab) { tab.webView.loadHTMLString("<p>x</p>", baseURL: URL(string: "https://localhost/moved-on")) }
+        #expect(tab.retryURL == nil)
+    }
+    @Test(.timeLimit(.minutes(1))) func aCommitAtTheRefusedAddressKeepsTheRetry() async {
+        let tab = Tab(profile: .temporary())
+        let address = URL(string: "https://localhost/same")!
+        tab.retryURL = address
+        await finishLoading(tab) { tab.webView.loadHTMLString("<p>401</p>", baseURL: address) }
+        #expect(tab.retryURL == address)
+    }
+    @Test(.timeLimit(.minutes(1))) func aRefusalDoesNotGoBack() async throws {
+        let folder = FileManager.default.temporaryDirectory.appending(path: "pob-back-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        for name in ["1", "2"] { try "<p>\(name)</p>".write(to: folder.appending(path: "\(name).html"), atomically: true, encoding: .utf8) }
+        let tab = Tab(profile: .temporary())
+        tab.alertSeam = { _ in .alertFirstButtonReturn }
+        for name in ["1", "2"] {
+            await finishLoading(tab) { tab.webView.loadFileURL(folder.appending(path: "\(name).html"), allowingReadAccessTo: folder) }
+        }
+        #expect(tab.webView.canGoBack)
+        _ = await answer(tab, badCertificate(host: "dev.example"))
+        try? await Task.sleep(for: .milliseconds(400))
+        #expect(tab.webView.url?.lastPathComponent == "2.html" && !tab.webView.canGoForward)
+    }
+    private func refusedTwice(_ clear: (Tab) async -> Void) async -> Int {
+        let tab = Tab(profile: .temporary())
+        var asked = 0
+        tab.alertSeam = { _ in asked += 1; return .alertFirstButtonReturn }
+        _ = await answer(tab, badCertificate(host: "dev.example"))
+        await clear(tab)
+        _ = await answer(tab, badCertificate(host: "dev.example"))
+        return asked
+    }
+    @Test(.timeLimit(.minutes(1))) func aRefusalIsForgottenWhenAPageCommits() async {
+        let asked = await refusedTwice { tab in
+            await finishLoading(tab) { tab.webView.loadHTMLString("<p>x</p>", baseURL: URL(string: "https://localhost/")) }
+        }
+        #expect(asked == 2)
+    }
+    @Test(.timeLimit(.minutes(1))) func aRefusalIsForgottenWhenALoadFails() async {
+        let asked = await refusedTwice { tab in
+            // A cancelled load shows no page, so only the failure itself can clear the memory.
+            tab.webView(tab.webView, didFailProvisionalNavigation: nil, withError: URLError(.cancelled))
+        }
+        #expect(asked == 2)
+    }
     @Test(.timeLimit(.minutes(1))) func aPasswordIsAskedForByHostAndKeptForTheSession() async throws {
         let tab = Tab(profile: .temporary())
         var shown: NSAlert?

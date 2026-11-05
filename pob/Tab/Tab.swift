@@ -140,8 +140,10 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
             isShowingErrorPage = true
             webView.reload()
         } else {
+            errorItems.removeAll { $0 === item } // the entry holds a real page now
             isShowingErrorPage = false
         }
+        if retryURL != webView.url { retryURL = nil } // the tab moved on. A 401 body commits at the same address, so it keeps its retry
         refusedHosts = []
     }
 
@@ -238,6 +240,8 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
         _ completion: @escaping @MainActor (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
     ) {
         let space = challenge.protectionSpace
+        // A background tab can't show the sheet, so it asks again when activated.
+        if alertSeam == nil, webView.window == nil, mainFrameURL?.host() == space.host { retryURL = mainFrameURL }
         let user = NSTextField(frame: NSRect(x: 0, y: 28, width: 260, height: 22))
         user.placeholderString = "Username"
         let password = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 22))
