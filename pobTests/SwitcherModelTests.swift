@@ -33,6 +33,17 @@ import Testing
     @Test func commandsMatchByTitle() {
         #expect(rows("web insp").contains { $0.target == .command(.toggleInspector) })
     }
+    /// A wrong search is harmless, and a wrong command acts on the page, so Return on a plain word has to search.
+    @Test(arguments: ["zoom", "back", "print", "close", "bookmark"])
+    func aWordFromACommandTitleStillSearchesFirst(word: String) {
+        let result = SwitcherModel.rows(query: word, tabs: [], bookmarks: [], history: [], commands: commands)
+        guard case .address(.search) = result.first?.target else {
+            Issue.record("expected the search row first")
+            return
+        }
+        #expect(result.dropFirst().allSatisfy { $0.section == "Commands" })
+        #expect(result.count > 1)
+    }
     @Test func emptyQueriesListOpenTabs() {
         #expect(rows("").map(\.target) == [.tab(deployTab.id)])
     }
@@ -66,17 +77,19 @@ import Testing
         let tabs = (0..<9).map { TabRecord(url: page($0)) }
         #expect(SwitcherModel.rows(query: "", tabs: tabs, bookmarks: [], history: [], commands: commands).count == 5)
     }
-    @Test func aURLGoesAfterTheTabsAndASearchGoesLast() {
+    @Test func aURLGoesAfterTheTabsAndASearchGoesAboveTheCommands() {
         let tab = TabRecord(url: URL(string: "https://apple.com/mac"), title: "Mac")
         let mark = Bookmark(id: UUID(), title: "Apple", url: URL(string: "https://apple.com/store")!, folder: nil, isPinned: false)
-        let address = SwitcherModel.rows(query: "apple.com", tabs: [tab], bookmarks: [mark], history: [], commands: [])
-        #expect(address.map(\.section) == ["Tabs", "", "Bookmarks"])
+        let seen = HistoryEntry(url: URL(string: "https://apple.com/tv")!, title: "Apple TV", visitCount: 1, lastVisit: .now)
+        let command = Command(id: .reload, title: "apple.com things", key: "", modifiers: [], isReserved: false) {}
+        let address = SwitcherModel.rows(query: "apple.com", tabs: [tab], bookmarks: [mark], history: [seen], commands: [command])
+        #expect(address.map(\.section) == ["Tabs", "", "Bookmarks", "History", "Commands"])
         #expect(address[1].target == .address(.url(URL(string: "https://apple.com")!)))
 
-        let search = SwitcherModel.rows(query: "apple", tabs: [tab], bookmarks: [mark], history: [], commands: [])
-        #expect(search.map(\.section) == ["Tabs", "Bookmarks", ""])
-        guard case .address(.search) = search[2].target else {
-            Issue.record("expected the search row last")
+        let search = SwitcherModel.rows(query: "apple", tabs: [tab], bookmarks: [mark], history: [seen], commands: [command])
+        #expect(search.map(\.section) == ["Tabs", "Bookmarks", "History", "", "Commands"])
+        guard case .address(.search) = search[3].target else {
+            Issue.record("expected the search row above the commands")
             return
         }
     }
@@ -168,6 +181,24 @@ import Testing
         list.chooseRow(1)
         list.chooseRow(3)
         #expect(chosen == [rows[0], rows[1]])
+    }
+    /// A row with no section of its own mustn't take the next header with it, or the commands would read as part of the search.
+    @Test func theSectionAfterASectionlessRowStillGetsItsHeader() {
+        let visit = SwitcherRow(target: .url(URL(string: "https://example.com")!), title: "Page", subtitle: "", section: "History")
+        let search = SwitcherRow(target: .command(.find), title: "word", subtitle: "Search Google", section: "")
+        let command = SwitcherRow(target: .command(.reload), title: "Command", subtitle: "", section: "Commands")
+        func chosenRows(_ shown: [SwitcherRow], count: Int) -> [SwitcherRow?] {
+            let list = SwitcherList(selectsFirstRow: true)
+            list.show(shown)
+            return (0..<count).map { index in
+                var chosen: SwitcherRow?
+                list.onChoose = { chosen = $0 }
+                list.chooseRow(index)
+                return chosen
+            }
+        }
+        #expect(chosenRows([visit, search, command], count: 5) == [nil, visit, search, nil, command])
+        #expect(chosenRows([search, command], count: 3) == [search, nil, command])
     }
     @Test func noRowsMeansNothingToMoveThrough() {
         let list = SwitcherList(selectsFirstRow: true)

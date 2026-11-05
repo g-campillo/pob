@@ -46,11 +46,12 @@ enum SwitcherModel {
         rows += history.filter { !listed.contains($0.url) }.prefix(historyLimit).map {
             SwitcherRow(target: .url($0.url), title: $0.title.isEmpty ? $0.url.absoluteString : $0.title, subtitle: $0.url.absoluteString, section: "History")
         }
-        rows += commands.filter { matches($0.title) }.prefix(commandLimit).map {
-            SwitcherRow(target: .command($0.id), title: $0.title, subtitle: "", section: "Commands")
-        }
+        // Above the commands, because Return takes the top row: a wrong search is harmless, and a wrong command acts on the page.
         if case .search = input {
             rows.append(SwitcherRow(target: .address(input), title: text, subtitle: "Search Google", section: ""))
+        }
+        rows += commands.filter { matches($0.title) }.prefix(commandLimit).map {
+            SwitcherRow(target: .command($0.id), title: $0.title, subtitle: "", section: "Commands")
         }
         return rows
     }

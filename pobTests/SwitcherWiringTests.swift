@@ -373,7 +373,8 @@ private final class HeldHistory {
         let field = controller.switcher.field
         controller.perform(.openSwitcher)
         try type("hide rail", into: field)
-        #expect(controller.switcher.list.rows.first?.target == .command(.toggleRail))
+        try press(down, in: field) // the search row comes first
+        #expect(controller.switcher.list.selection?.target == .command(.toggleRail))
         try press(enter, in: field)
         #expect(controller.railState.visibility == .pinned)
         #expect(controller.switcher.isHidden)
@@ -384,6 +385,7 @@ private final class HeldHistory {
         let field = controller.switcher.field
         controller.perform(.openSwitcher)
         try type("open switcher", into: field)
+        try press(down, in: field)
         try press(enter, in: field)
         #expect(!controller.switcher.isHidden)
         #expect(field.stringValue == "")
@@ -473,9 +475,25 @@ private final class HeldHistory {
         let field = controller.switcher.field
         controller.perform(.openSwitcher)
         try type("close tab", into: field)
-        #expect(controller.switcher.list.rows.first?.target == .command(.closeTab))
+        try press(down, in: field)
+        #expect(controller.switcher.list.selection?.target == .command(.closeTab))
         try press(enter, in: field)
         #expect(tabs.list.records.count == 1)
+    }
+    /// The row is caught before it runs, because a real search would reach the internet.
+    @Test(arguments: ["zoom", "back", "print", "close", "bookmark"])
+    func returnOnAWordFromACommandTitleSearches(word: String) throws {
+        let (controller, _) = make()
+        let field = controller.switcher.field
+        var chosen: SwitcherRow?
+        controller.switcher.onChoose = { chosen = $0 }
+        controller.perform(.openSwitcher)
+        try type(word, into: field)
+        try press(enter, in: field)
+        guard case .address(.search) = chosen?.target else {
+            Issue.record("expected the search row, got \(String(describing: chosen))")
+            return
+        }
     }
 
     // MARK: History
@@ -813,6 +831,7 @@ private final class HeldHistory {
     @Test func aCommandSuggestionPerforms() throws {
         let (controller, _) = make()
         try editAddress("hide rail", in: controller)
+        try press(down, in: controller.rail.addressField) // the search row comes first
         try press(down, in: controller.rail.addressField)
         try press(enter, in: controller.rail.addressField)
         #expect(controller.railState.visibility == .pinned)
