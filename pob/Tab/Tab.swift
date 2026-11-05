@@ -129,6 +129,8 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     func load(_ input: AddressInput) {
         switch input {
+        case .url(let url) where url.isFileURL:
+            webView.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent())
         case .url(let url), .search(let url):
             webView.load(URLRequest(url: url))
         }

@@ -10,6 +10,13 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// Both are set at launch, past the test-host check, so a test run can't reach the real profile. Tests set their own.
     var profile: Profile?
     var appearance: AppearanceModel?
+    /// Replaceable so a test can't change the Mac's default browser.
+    var requestDefault: (String) async throws -> Void = {
+        try await NSWorkspace.shared.setDefaultApplication(at: Bundle.main.bundleURL, toOpenURLsWithScheme: $0)
+    }
+    /// Links that arrive before the session is back wait here, so a restored window isn't replaced.
+    private var pendingLinks: [AddressInput] = []
+    private var hasRestored = false
     private var commands: CommandList?
     private var keyMonitor: Any?
     private var displayOptionsObserver: NSObjectProtocol?
@@ -88,8 +95,53 @@ final class AppController: NSObject, NSApplicationDelegate {
             for window in session.windows {
                 openWindow(restoring: window)
             }
-            if windows.isEmpty {
+            if windows.isEmpty, pendingLinks.isEmpty {
                 openWindow(restoring: nil)
+            }
+        }
+        hasRestored = true
+        let links = pendingLinks
+        pendingLinks = []
+        open(links, keyWindow: nil)
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        open(urls.compactMap(IncomingLink.address(for:)), keyWindow: NSApp.keyWindow)
+    }
+
+    func open(_ urls: [URL], keyWindow: NSWindow?) {
+        open(urls.compactMap(IncomingLink.address(for:)), keyWindow: keyWindow)
+    }
+
+    /// The key browser window, else the front one, else the last opened (hosted windows aren't ordered), else a new one.
+    private func open(_ links: [AddressInput], keyWindow: NSWindow?) {
+        guard !links.isEmpty else { return }
+        guard hasRestored else {
+            pendingLinks += links
+            return
+        }
+        if windows.isEmpty { openWindow(restoring: nil) }
+        let target = controller(of: keyWindow) ?? NSApp.orderedWindows.lazy.compactMap(controller(of:)).first ?? windows.last
+        guard let target else { return }
+        links.forEach(target.openLink)
+        if !Self.isRunningTests {
+            target.window?.makeKeyAndOrderFront(nil)
+            NSApp.activate()
+        }
+    }
+
+    /// macOS asks the user to confirm each scheme itself, and this works with no window open.
+    func makeDefaultBrowser(keyWindow: NSWindow?) async {
+        do {
+            for scheme in ["http", "https"] {
+                try await requestDefault(scheme)
+            }
+        } catch {
+            let alert = NSAlert(error: error)
+            if let keyWindow {
+                await alert.beginSheetModal(for: keyWindow)
+            } else {
+                alert.runModal()
             }
         }
     }
@@ -126,7 +178,9 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// Commands act on the key window. Anything else that's key keeps its keys, so "no window" means nothing is key
     /// and no browser window is showing. A minimized one doesn't count, or ⌘N would do nothing.
     func perform(_ id: CommandID, keyWindow: NSWindow?) {
-        if let controller = controller(of: keyWindow) {
+        if id == .makeDefaultBrowser {
+            Task { await makeDefaultBrowser(keyWindow: keyWindow) }
+        } else if let controller = controller(of: keyWindow) {
             controller.perform(id)
         } else if keyWindow == nil, !isShowingAWindow, [.openSwitcher, .openSwitcherFromPage, .newWindow].contains(id) {
             openWindow(restoring: nil)

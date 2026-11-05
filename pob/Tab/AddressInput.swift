@@ -67,3 +67,11 @@ enum AddressInput: Equatable {
         return octets.count == 4 && octets.allSatisfy { Int($0).map { (0...255).contains($0) } ?? false }
     }
 }
+
+/// What the system hands over when pob is the default browser.
+enum IncomingLink {
+    static func address(for url: URL) -> AddressInput? {
+        guard let scheme = url.scheme?.lowercased(), ["http", "https", "file"].contains(scheme) else { return nil }
+        return .url(url)
+    }
+}

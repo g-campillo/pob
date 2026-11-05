@@ -143,6 +143,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         case .zoomOut: tab?.zoomOut()
         case .actualSize: tab?.actualSize()
         case .newWindow: onNewWindow?()
+        case .makeDefaultBrowser: break // AppController takes it before it gets here
         case .screenRecordingSettings: openURL(Permissions.screenRecordingSettingsURL)
         case .resetSitePermissions:
             guard let tab, let host = tab.webView.url?.host() else { return }
@@ -396,6 +397,12 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         }
         switcher.open()
         searchInSwitcher("")
+    }
+
+    /// A link from outside opens as the active tab, and the switcher a fresh window opens with has no business over it.
+    func openLink(_ input: AddressInput) {
+        if !switcher.isHidden { closeSwitcher() }
+        tabs.newTab(input, activate: true)
     }
 
     private func closeSwitcher() {
