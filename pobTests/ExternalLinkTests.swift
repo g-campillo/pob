@@ -198,8 +198,8 @@ private final class SchemeHandler: NSObject, WKURLSchemeHandler {
         configuration.websiteDataStore = .nonPersistent()
         configuration.setURLSchemeHandler(SchemeHandler(), forURLScheme: "pobtest")
         let (tab, seen) = make(Tab(profile: .temporary(), configuration: configuration))
-        await finishLoading(tab) { tab.webView.load(URLRequest(url: URL(string: "pobtest://page/one")!)) }
-        #expect(tab.webView.url?.scheme == "pobtest")
+        tab.webView.load(URLRequest(url: URL(string: "pobtest://page/one")!))
+        #expect(await eventually { !tab.webView.isLoading && tab.webView.url?.scheme == "pobtest" })
         #expect(seen.alerts.isEmpty)
     }
 }
