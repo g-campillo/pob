@@ -141,6 +141,13 @@ final class TabManager {
             return popup.webView
         }
         tab.onCloseRequested = { [weak self] in self?.closeFromPage(id) }
+        tab.onBecameDownload = { [weak self, weak tab] in
+            // A `target="_blank"` attachment opens a tab that never gets a page, so it goes back to where it came from.
+            // `url` already holds the address being loaded, so the committed page is what says whether it has one.
+            let committed = tab?.webView.backForwardList.currentItem?.url
+            guard let self, openers[id] != nil, committed == nil || committed?.scheme == "about" else { return }
+            closeFromPage(id)
+        }
     }
 
     private static func isRecordable(_ url: URL) -> Bool { url.scheme == "http" || url.scheme == "https" }

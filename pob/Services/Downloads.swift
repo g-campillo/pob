@@ -44,7 +44,7 @@ final class Downloads: NSObject, WKDownloadDelegate {
         download.delegate = self
         let id = UUID()
         let observation = download.progress.observe(\.fractionCompleted) { [weak self] progress, _ in
-            let fraction = progress.fractionCompleted
+            let fraction = progress.fractionCompleted.isFinite ? progress.fractionCompleted : 0
             Task { @MainActor in self?.updateProgress(id, fraction) } // KVO may arrive off the main thread
         }
         running[ObjectIdentifier(download)] = Running(id: id, download: download, request: download.originalRequest, observation: observation)
@@ -94,15 +94,32 @@ final class Downloads: NSObject, WKDownloadDelegate {
     }
 
     private func finish(_ download: WKDownload, as state: DownloadState) {
-        guard let entry = running.removeValue(forKey: ObjectIdentifier(download)),
-              let index = items.firstIndex(where: { $0.id == entry.id }) else { return }
+        guard let entry = running.removeValue(forKey: ObjectIdentifier(download)) else { return }
+        guard let index = items.firstIndex(where: { $0.id == entry.id }) else {
+            // Failed before any response, so no destination was ever chosen. The row still needs to be there for Retry.
+            let name = Self.safeDestination(directory: directory, suggestedFilename: entry.request?.url?.lastPathComponent ?? "").lastPathComponent
+            items.append(DownloadItem(id: entry.id, filename: name, destination: directory.appending(path: name), state: .failed, progress: 0))
+            requests[entry.id] = entry.request
+            notify()
+            onStart?(name)
+            return
+        }
         items[index].state = state
         if state == .finished {
             items[index].progress = 1
         } else {
+            discardPartialFile(of: items[index], wroteBytes: entry.download.progress.completedUnitCount > 0)
             claimed.remove(items[index].destination)
         }
         notify()
+    }
+
+    /// Only a file this download wrote to. A failure on a path pob doesn't own, such as a dangling symlink, leaves it alone.
+    private func discardPartialFile(of item: DownloadItem, wroteBytes: Bool) {
+        let path = item.destination.path
+        guard wroteBytes, let type = try? FileManager.default.attributesOfItem(atPath: path)[.type] as? FileAttributeType,
+              type == .typeRegular else { return }
+        try? FileManager.default.removeItem(at: item.destination)
     }
 
     // MARK: WKDownloadDelegate
@@ -139,20 +156,24 @@ final class Downloads: NSObject, WKDownloadDelegate {
 
     // MARK: Names
 
-    /// The name comes from the server, so it can't leave the folder, hold control characters or be too long for the file system.
+    /// The name comes from the server, so it can't leave the folder, hold control or invisible formatting characters
+    /// (a right-to-left override disguises an extension) or be too long for the file system.
     static func safeDestination(directory: URL, suggestedFilename: String, taken: Set<URL> = []) -> URL {
-        let cleaned = String(String.UnicodeScalarView(
-            suggestedFilename.replacingOccurrences(of: "\\", with: "/").unicodeScalars.filter { $0.properties.generalCategory != .control }
-        ))
-        var name = cleaned.split(separator: "/").last.map(String.init) ?? ""
+        // Split on scalars: a "/" followed by a combining mark is a single Character that a Character split would keep.
+        let kept = suggestedFilename.unicodeScalars.filter {
+            $0.properties.generalCategory != .control && !$0.properties.isDefaultIgnorableCodePoint
+        }
+        var name = kept.split { $0 == "/" || $0 == "\\" }.last.map { String(String.UnicodeScalarView($0)) } ?? ""
         if name.isEmpty || name == "." || name == ".." { name = "download" }
 
         // 255 bytes is the file system's limit. Leave room for " 99999".
         let limit = 249
         var ext = (name as NSString).pathExtension
         if ext.utf8.count > 32 { ext = "" }
-        var stem = ext.isEmpty ? name : String(name.dropLast(ext.count + 1))
+        var stem = ext.isEmpty ? name : (name as NSString).deletingPathExtension
         let suffix = ext.isEmpty ? "" : "." + ext
+        // A Character is at least a byte, so this bounds the loop below however long the page's name is.
+        stem = String(stem.prefix(limit))
         // URLs hand the name back decomposed, which is longer for accented letters, so measure that.
         func bytes(_ text: String) -> Int { text.decomposedStringWithCanonicalMapping.utf8.count }
         while bytes(stem) + bytes(suffix) > limit { stem.removeLast() }

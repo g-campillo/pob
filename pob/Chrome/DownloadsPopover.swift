@@ -6,7 +6,7 @@ final class DownloadsPopover: NSViewController {
     private let onRetry: (UUID) -> Void
     private let stack = NSStackView()
     private var bars: [UUID: NSProgressIndicator] = [:]
-    private var shownRows: [[AnyHashable]] = []
+    private var shownRows: [[AnyHashable]]? // nil until the first build, so an empty list still builds
 
     init(downloads: Downloads, onRetry: @escaping (UUID) -> Void) {
         self.downloads = downloads
@@ -17,21 +17,34 @@ final class DownloadsPopover: NSViewController {
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
 
+    /// Tall enough for a few rows. More scroll.
+    private static let maxHeight: CGFloat = 400
+
+    private let scrollView = NSScrollView()
+
     override func loadView() {
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false
-        let container = NSView()
-        container.addSubview(stack)
+        let document = FlippedView()
+        document.translatesAutoresizingMaskIntoConstraints = false
+        document.addSubview(stack)
+        scrollView.documentView = document
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+        scrollView.autohidesScrollers = true
         NSLayoutConstraint.activate([
-            container.widthAnchor.constraint(equalToConstant: 300),
-            stack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 14),
-            stack.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -14),
-            stack.topAnchor.constraint(equalTo: container.topAnchor, constant: 14),
-            stack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -14),
+            scrollView.widthAnchor.constraint(equalToConstant: 300),
+            document.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
+            document.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
+            document.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
+            stack.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 14),
+            stack.trailingAnchor.constraint(equalTo: document.trailingAnchor, constant: -14),
+            stack.topAnchor.constraint(equalTo: document.topAnchor, constant: 14),
+            stack.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -14),
         ])
-        view = container
+        view = scrollView
         refresh()
     }
 
@@ -55,7 +68,7 @@ final class DownloadsPopover: NSViewController {
             rebuild(items)
             return
         }
-        for item in items { bars[item.id]?.doubleValue = item.progress }
+        for item in items { show(item.progress, on: bars[item.id]) }
     }
 
     private func rebuild(_ items: [DownloadItem]) {
@@ -70,6 +83,16 @@ final class DownloadsPopover: NSViewController {
             stack.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
+        // The popover grows to fit its rows, up to a limit, and scrolls past it.
+        stack.layoutSubtreeIfNeeded()
+        preferredContentSize = NSSize(width: 300, height: min(stack.fittingSize.height + 28, Self.maxHeight))
+    }
+
+    /// With no length from the server there's no fraction, so the bar just moves.
+    private func show(_ progress: Double, on bar: NSProgressIndicator?) {
+        guard let bar else { return }
+        bar.isIndeterminate = progress <= 0
+        if bar.isIndeterminate { bar.startAnimation(nil) } else { bar.doubleValue = progress }
     }
 
     private func makeRow(_ item: DownloadItem) -> NSView {
@@ -84,8 +107,8 @@ final class DownloadsPopover: NSViewController {
             bar.style = .bar
             bar.minValue = 0
             bar.maxValue = 1
-            bar.doubleValue = item.progress
             bar.isIndeterminate = false
+            show(item.progress, on: bar)
             bar.setAccessibilityLabel("Progress of \(item.filename)")
             bars[item.id] = bar
             trailing = bar
@@ -127,4 +150,8 @@ final class DownloadsPopover: NSViewController {
         guard let item = itemsByButton[ObjectIdentifier(sender)] else { return }
         onRetry(item.id)
     }
+}
+
+private final class FlippedView: NSView {
+    override var isFlipped: Bool { true }
 }

@@ -13,6 +13,8 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
     var onOpenLink: ((URLRequest, _ activate: Bool) -> Void)?
     var onCreatePopup: ((WKWebViewConfiguration) -> WKWebView?)?
     var onCloseRequested: (() -> Void)?
+    /// A navigation in this tab turned into a download.
+    var onBecameDownload: (() -> Void)?
 
     /// True from the moment an error or crash page loads until the next real page commits, so history and favicons skip it.
     private(set) var isShowingErrorPage = false
@@ -142,10 +144,12 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
         profile.downloads.track(download)
+        onBecameDownload?()
     }
 
     func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
         profile.downloads.track(download)
+        onBecameDownload?()
     }
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {

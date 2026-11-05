@@ -8,8 +8,8 @@ import WebKit
 final class LocalServer {
     enum Reply {
         case body(Data, headers: [String: String] = [:])
-        /// Promises `length` bytes, sends `sent`, then stays silent until `dropConnections()`.
-        case stall(sent: Data, length: Int)
+        /// Promises `length` bytes (none promised when nil), sends `sent`, then stays silent until `dropConnections()`.
+        case stall(sent: Data, length: Int?)
     }
 
     var routes: [String: Reply] = [:]
@@ -42,8 +42,16 @@ final class LocalServer {
     func url(_ path: String) -> URL { URL(string: "http://127.0.0.1:\(port)\(path)")! }
 
     func dropConnections() {
-        connections.forEach { $0.cancel() }
+        let open = connections
         connections = []
+        open.forEach { $0.cancel() }
+    }
+
+    /// Each connection is cancelled once, or the network layer logs the second.
+    private func close(_ connection: NWConnection) {
+        guard let index = connections.firstIndex(where: { $0 === connection }) else { return }
+        connections.remove(at: index)
+        connection.cancel()
     }
 
     func stop() {
@@ -70,20 +78,22 @@ final class LocalServer {
             for (key, value) in headers { head += "\(key): \(value)\r\n" }
             head += "Content-Length: \(body.count)\r\n\r\n"
             connection.send(content: Data(head.utf8) + body, completion: .contentProcessed { _ in
-                connection.cancel()
+                MainActor.assumeIsolated { self.close(connection) }
             })
         case .stall(let sent, let length)?:
-            head += "Content-Type: application/octet-stream\r\nContent-Length: \(length)\r\n\r\n"
+            head += "Content-Type: application/octet-stream\r\n"
+            if let length { head += "Content-Length: \(length)\r\n" }
+            head += "\r\n"
             connection.send(content: Data(head.utf8) + sent, completion: .idempotent)
         case nil:
             connection.send(content: Data("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8), completion: .contentProcessed { _ in
-                connection.cancel()
+                MainActor.assumeIsolated { self.close(connection) }
             })
         }
     }
 }
 
-@Suite struct DownloadsTests {
+@Suite(.timeLimit(.minutes(1))) struct DownloadsTests {
     func directory() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -118,7 +128,7 @@ final class LocalServer {
         try Data().write(to: folder.appending(path: "report.pdf"))
         #expect(Downloads.safeDestination(directory: folder, suggestedFilename: "report.pdf").lastPathComponent == "report 2.pdf")
     }
-    @Test(arguments: ["../../.zshrc", "/etc/passwd", "a/b/c.txt", "..\\..\\x.txt"])
+    @Test(arguments: ["../../.zshrc", "/etc/passwd", "a/b/c.txt", "..\\..\\x.txt", "../\u{301}evil.txt", "..\u{200D}/x", "/\u{FE0F}x"])
     func namesCantEscapeTheFolder(name: String) throws {
         let folder = try directory()
         let result = Downloads.safeDestination(directory: folder, suggestedFilename: name)
@@ -133,6 +143,18 @@ final class LocalServer {
         let folder = try directory()
         let name = Downloads.safeDestination(directory: folder, suggestedFilename: "a\u{0}b\nc\u{7F}.txt").lastPathComponent
         #expect(name == "abc.txt")
+    }
+    @Test func lookalikeFormattingCharactersAreStripped() throws {
+        let folder = try directory()
+        let name = Downloads.safeDestination(directory: folder, suggestedFilename: "report\u{202E}fdp.app").lastPathComponent
+        #expect(name == "reportfdp.app")
+    }
+    @Test func hugeNamesDontFreezeTheMainThread() throws {
+        let folder = try directory()
+        let start = ContinuousClock.now
+        let result = Downloads.safeDestination(directory: folder, suggestedFilename: String(repeating: "é", count: 40_000) + ".pdf")
+        #expect(ContinuousClock.now - start < .seconds(1))
+        #expect(result.pathExtension == "pdf")
     }
     @Test func longNamesAreShortenedKeepingTheExtension() throws {
         let folder = try directory()
@@ -273,6 +295,73 @@ final class LocalServer {
         #expect(changes <= 3)
     }
 
+    @Test func downloadFromADeadServerKeepsAFailedRowAndRetryKeepsIt() async throws {
+        let dead = try await server([:])
+        let url = dead.url("/gone.bin")
+        dead.stop()
+        let tab = Tab(profile: .temporary())
+        let downloads = tab.profile.downloads
+        var notices: [String] = []
+        downloads.onStart = { notices.append($0) }
+        tab.webView.startDownload(using: URLRequest(url: url)) { downloads.track($0) }
+
+        #expect(await within { downloads.items.first?.state == .failed })
+        #expect(downloads.items.count == 1)
+        #expect(downloads.items.first?.filename == "gone.bin")
+        #expect(notices == ["gone.bin"])
+
+        downloads.retry(try #require(downloads.items.first).id, in: tab.webView)
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(await within { downloads.items.count == 1 && downloads.items.first?.state == .failed })
+        // and it can be retried again, once the server is back
+        #expect(downloads.items.count == 1)
+    }
+
+    @Test func failedDownloadDeletesItsPartialFileSoRetryKeepsTheName() async throws {
+        let server = try await server(["/f.bin": .stall(sent: Data("part".utf8), length: 1_000_000)])
+        defer { server.stop() }
+        let tab = Tab(profile: .temporary())
+        let downloads = tab.profile.downloads
+        tab.webView.startDownload(using: URLRequest(url: server.url("/f.bin"))) { downloads.track($0) }
+        #expect(await within { downloads.items.first?.state == .running })
+        let partial = try #require(downloads.items.first).destination
+        #expect(await within { FileManager.default.fileExists(atPath: partial.path) })
+        #expect(await within { (downloads.items.first?.progress ?? 0) > 0 })
+
+        server.dropConnections()
+        #expect(await within { downloads.items.first?.state == .failed })
+        #expect(!FileManager.default.fileExists(atPath: partial.path))
+
+        server.routes["/f.bin"] = .body(Data("whole".utf8), headers: ["Content-Type": "application/octet-stream"])
+        downloads.retry(try #require(downloads.items.first).id, in: tab.webView)
+        #expect(await within { downloads.items.contains { $0.state == .finished } })
+        #expect(downloads.items.first { $0.state == .finished }?.filename == "f.bin")
+    }
+
+    @Test func progressComesThroughTheRealObservation() async throws {
+        let server = try await server(["/half.bin": .stall(sent: Data(count: 500), length: 1000)])
+        defer { server.stop() }
+        let tab = Tab(profile: .temporary())
+        let downloads = tab.profile.downloads
+        tab.webView.startDownload(using: URLRequest(url: server.url("/half.bin"))) { downloads.track($0) }
+        #expect(await within { abs((downloads.items.first?.progress ?? 0) - 0.5) < 0.01 })
+    }
+
+    @Test func attachmentFromAPopupClosesThePopupAndReturnsToTheOpener() async throws {
+        let server = try await server(["/a.bin": .body(Data("a".utf8), headers: ["Content-Disposition": "attachment; filename=a.bin"])])
+        defer { server.stop() }
+        let tabs = TabManager(profile: .temporary(), keepsSpare: false)
+        let opener = tabs.newTab(nil, activate: true)
+        let popup = try #require(opener.onCreatePopup?(opener.webView.configuration))
+        #expect(tabs.activeTab?.webView === popup)
+
+        popup.load(URLRequest(url: server.url("/a.bin")))
+
+        #expect(await within { opener.profile.downloads.items.first?.state == .finished })
+        #expect(await within { tabs.activeTab === opener })
+        #expect(tabs.list.records.count == 1)
+    }
+
     // MARK: Chrome
 
     @Test func railHasALabelledDownloadsButton() {
@@ -293,11 +382,58 @@ final class LocalServer {
         #expect(await within { downloads.items.first?.state == .finished })
 
         let popover = DownloadsPopover(downloads: downloads) { _ in }
-        let buttons = popover.view.subviews.first.map { ($0 as? NSStackView)?.arrangedSubviews ?? [] } ?? []
-        #expect(buttons.count == 1)
+        _ = popover.view
+        #expect(texts(in: popover.view).contains("a.bin"))
         popover.viewWillAppear()
         #expect(downloads.onChange != nil)
         popover.viewWillDisappear()
         #expect(downloads.onChange == nil)
+    }
+
+    func texts(in view: NSView) -> [String] {
+        ((view as? NSTextField).map { [$0.stringValue] } ?? []) + view.subviews.flatMap(texts(in:))
+    }
+
+    func scrollView(in view: NSView) -> NSScrollView? {
+        (view as? NSScrollView) ?? view.subviews.lazy.compactMap(scrollView(in:)).first
+    }
+
+    @Test func emptyPopoverSaysSo() {
+        let popover = DownloadsPopover(downloads: Downloads(directory: FileManager.default.temporaryDirectory)) { _ in }
+        _ = popover.view
+        #expect(texts(in: popover.view).contains("No downloads yet"))
+    }
+
+    @Test func manyRowsScrollInsideAShortPopover() async throws {
+        let server = try await server(["/a.bin": .body(Data("a".utf8), headers: ["Content-Type": "application/octet-stream"])])
+        defer { server.stop() }
+        let tab = Tab(profile: .temporary())
+        let downloads = tab.profile.downloads
+        for _ in 0..<14 {
+            tab.webView.startDownload(using: URLRequest(url: server.url("/a.bin"))) { downloads.track($0) }
+        }
+        #expect(await within { downloads.items.count == 14 && downloads.items.allSatisfy { $0.state == .finished } })
+
+        let popover = DownloadsPopover(downloads: downloads) { _ in }
+        _ = popover.view
+        popover.view.layoutSubtreeIfNeeded()
+        let scroll = try #require(scrollView(in: popover.view))
+        #expect(popover.preferredContentSize.height <= 420)
+        #expect(try #require(scroll.documentView).frame.height > popover.preferredContentSize.height)
+    }
+
+    @Test func aDownloadWithNoKnownLengthShowsAnIndeterminateBar() async throws {
+        let server = try await server(["/u.bin": .stall(sent: Data(count: 10), length: nil)])
+        defer { server.stop() }
+        let tab = Tab(profile: .temporary())
+        let downloads = tab.profile.downloads
+        tab.webView.startDownload(using: URLRequest(url: server.url("/u.bin"))) { downloads.track($0) }
+        #expect(await within { downloads.items.first?.state == .running })
+        let popover = DownloadsPopover(downloads: downloads) { _ in }
+        _ = popover.view
+        func bar(in view: NSView) -> NSProgressIndicator? {
+            (view as? NSProgressIndicator) ?? view.subviews.lazy.compactMap(bar(in:)).first
+        }
+        #expect(try #require(bar(in: popover.view)).isIndeterminate)
     }
 }
