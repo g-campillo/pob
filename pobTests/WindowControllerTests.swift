@@ -316,24 +316,66 @@ import WebKit
         #expect(store["localhost"].zoom == 1.25)
         #expect(Permissions.remembered([.camera], host: "other.com", in: store) == false)
     }
-    @Test func closingTheLastTabClosesTheWindow() async throws {
-        let (controller, _) = make()
-        let window = try #require(controller.window)
-        await confirmation { closed in
+    func expectClose(of window: NSWindow, count: Int, during body: () -> Void) async {
+        await confirmation(expectedCount: count) { closed in
             let observer = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: nil) { _ in closed() }
-            controller.perform(.closeTab)
+            body()
             NotificationCenter.default.removeObserver(observer)
         }
     }
-    @Test func aPageClosingTheLastTabClosesTheWindow() async throws {
+    /// The window owns what ⇧⌘T brings back, so it stays. With nothing left in it, the next ⌘W is what closes it.
+    @Test func closingTheLastTabKeepsTheWindowWithTheSwitcherOpen() async throws {
+        let (controller, _) = make()
+        let window = try #require(controller.window)
+        await expectClose(of: window, count: 0) { controller.perform(.closeTab) }
+        #expect(controller.tabs.isEmpty)
+        #expect(!controller.switcher.isHidden)
+        #expect(window.firstResponder === controller.switcher.field.currentEditor())
+        #expect(controller.switcher.list.rows.isEmpty)
+    }
+    @Test func theNextCloseTabClosesTheEmptyWindow() async throws {
+        let (controller, _) = make()
+        let window = try #require(controller.window)
+        controller.perform(.closeTab)
+        await expectClose(of: window, count: 1) { controller.perform(.closeTab) }
+    }
+    @Test func aPageClosingTheLastTabKeepsTheWindowWithTheSwitcherOpen() async throws {
         let (controller, _) = make()
         let window = try #require(controller.window)
         let tab = try #require(controller.tab)
-        await confirmation { closed in
-            let observer = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: nil) { _ in closed() }
-            tab.webViewDidClose(tab.webView)
-            NotificationCenter.default.removeObserver(observer)
-        }
+        await expectClose(of: window, count: 0) { tab.webViewDidClose(tab.webView) }
+        #expect(controller.tabs.isEmpty)
+        #expect(!controller.switcher.isHidden)
+    }
+    @Test func reopeningBringsTheLastTabBackAndClosesTheSwitcher() async throws {
+        let (controller, _) = make()
+        let tab = try #require(controller.tab)
+        let address = URL(string: "https://localhost/last")!
+        await finishLoading(tab) { tab.webView.loadSimulatedRequest(URLRequest(url: address), responseHTML: "<title>Last</title>") }
+        let id = controller.tabs.list.activeID
+        controller.perform(.closeTab)
+
+        controller.perform(.reopenTab)
+        #expect(controller.switcher.isHidden)
+        #expect(controller.tabs.list.activeID == id)
+        #expect(controller.tabs.list.active?.url == address)
+        #expect(controller.tab?.pageView.superview === controller.window?.contentView)
+        #expect(controller.window?.firstResponder === controller.tab?.webView)
+    }
+    /// A page with one history entry may close itself, so this goes through WebKit and not the delegate call alone.
+    @Test func aPageThatClosedItselfComesBackToo() async throws {
+        let (controller, _) = make()
+        let tab = try #require(controller.tab)
+        let address = URL(string: "https://localhost/closing")!
+        await finishLoading(tab) { tab.webView.loadSimulatedRequest(URLRequest(url: address), responseHTML: "<title>Closing</title>") }
+        _ = try await tab.webView.evaluateJavaScript("window.close(); 1")
+        #expect(await eventually { controller.tabs.isEmpty })
+        #expect(!controller.switcher.isHidden)
+
+        controller.perform(.reopenTab)
+        #expect(controller.switcher.isHidden)
+        #expect(controller.tabs.list.active?.url == address)
+        #expect(controller.window?.firstResponder === controller.tab?.webView)
     }
     @Test func closingAnotherTabLeavesTheWindowOpen() async throws {
         let tabs = emptyTabs()

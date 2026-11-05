@@ -105,8 +105,8 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         if !switcher.isHidden, id != .openSwitcher, id != .openSwitcherFromPage {
             // Commands act on the window, and several of them move the keyboard, so the panel can't stay up over them.
             closeSwitcher()
-            // ⌘T says New Tab, so ⌘T then ⌘W means "never mind", not "close the page behind it".
-            if id == .closeTab { return }
+            // ⌘T says New Tab, so ⌘T then ⌘W means "never mind", not "close the page behind it". With no page, it closes the window.
+            if id == .closeTab, !tabs.isEmpty { return }
         }
         switch id {
         case .back: tab?.webView.goBack()
@@ -466,8 +466,8 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         tabs.onActiveChange = { [weak self] in
             guard let self else { return }
             showActiveTab()
-            if tabs.isEmpty {
-                window?.performClose(nil)
+            if tabs.isEmpty { // the window owns what ⇧⌘T brings back, so it stays, and the next ⌘W closes it
+                perform(.openSwitcher)
             }
         }
     }

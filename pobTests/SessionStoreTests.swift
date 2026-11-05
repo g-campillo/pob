@@ -480,16 +480,35 @@ private final class Reached {
         app.windows[0].perform(.closeWindow)
         #expect(await eventually { sessionFile(of: profile).load()?.windows.map { $0.tabs.map(\.id) } == [[kept.id]] })
     }
-    @Test(arguments: [CommandID.closeTab, .closeWindow])
-    func closingTheLastWindowOnPurposeEmptiesTheSession(command: CommandID) async {
+    /// ⌘W leaves the empty window standing, so closing it takes a second press.
+    @Test(arguments: [[CommandID.closeTab, .closeTab], [.closeWindow]])
+    func closingTheLastWindowOnPurposeEmptiesTheSession(commands: [CommandID]) async {
         let profile = Profile.temporary()
         profile.session.save(SessionSnapshot(windows: [window(page("last"))]))
         let app = makeApp(profile)
         app.restoreSession()
 
-        app.windows[0].perform(command)
+        let controller = app.windows[0]
+        commands.forEach(controller.perform)
         #expect(app.windows.isEmpty)
         #expect(await eventually { sessionFile(of: profile).load() == SessionSnapshot(windows: []) })
+    }
+    /// The window stays for ⇧⌘T, but with no tabs it leaves nothing to bring back after a quit.
+    @Test func aWindowEmptiedByClosingItsLastTabIsOutOfTheSessionUntilTheTabReturns() async {
+        let profile = Profile.temporary()
+        let last = page("last")
+        profile.session.save(SessionSnapshot(windows: [window(last)]))
+        let app = makeApp(profile)
+        app.restoreSession()
+
+        let controller = app.windows[0]
+        controller.perform(.closeTab)
+        #expect(app.windows.count == 1)
+        #expect(app.sessionSnapshot.windows.isEmpty)
+        #expect(await eventually { sessionFile(of: profile).load() == SessionSnapshot(windows: []) })
+
+        controller.perform(.reopenTab)
+        #expect(await eventually { sessionFile(of: profile).load()?.windows.first?.tabs.map(\.id) == [last.id] })
     }
 
     // MARK: The test host
