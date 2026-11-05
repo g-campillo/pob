@@ -67,7 +67,11 @@ private final class SchemeHandler: NSObject, WKURLSchemeHandler {
     @Test(arguments: [NSApplication.ModalResponse.alertFirstButtonReturn, .alertSecondButtonReturn])
     func nothingIsRemembered(answer: NSApplication.ModalResponse) {
         let (tab, seen) = make(answer: answer)
+        let start = Date.now
+        var seconds = 0.0
+        tab.now = { start.addingTimeInterval(seconds) }
         decide(tab, link)
+        seconds = 60 // well past the pause after a Cancel
         decide(tab, link)
         #expect(seen.alerts.count == 2)
     }
@@ -101,12 +105,70 @@ private final class SchemeHandler: NSObject, WKURLSchemeHandler {
                 decide(tab, link)
                 _ = tab.webView(tab.webView, createWebViewWith: tab.webView.configuration, for: FakeNavigationAction(url: link, type: .other, modifiers: []), windowFeatures: keptWindowFeatures())
             }
-            return .alertSecondButtonReturn
+            return .alertFirstButtonReturn
         }
         decide(tab, link)
         #expect(asked == 1)
         decide(tab, link)
         #expect(asked == 2)
+    }
+
+    // MARK: After Cancel
+
+    /// Reserved keys don't reach the window while a sheet is key, so a page that asked again at once could leave no way to press ⌘W.
+    @Test func afterCancelTheTabDropsRequestsForThreeSeconds() {
+        let (tab, seen) = make(answer: .alertSecondButtonReturn)
+        let start = Date.now
+        var seconds = 0.0
+        tab.now = { start.addingTimeInterval(seconds) }
+        decide(tab, link)
+        #expect(seen.alerts.count == 1)
+
+        seconds = 2.9
+        #expect(decide(tab, link) == .cancel)
+        #expect(tab.webView(tab.webView, createWebViewWith: tab.webView.configuration, for: FakeNavigationAction(url: link, type: .other, modifiers: []), windowFeatures: keptWindowFeatures()) == nil)
+        #expect(seen.alerts.count == 1)
+
+        seconds = 3
+        decide(tab, link)
+        #expect(seen.alerts.count == 2)
+    }
+    /// A looping page asks all through the pause, and that can't be what decides when it ends.
+    @Test func requestsDroppedAfterCancelDontExtendThePause() {
+        let (tab, seen) = make(answer: .alertSecondButtonReturn)
+        let start = Date.now
+        var seconds = 0.0
+        tab.now = { start.addingTimeInterval(seconds) }
+        decide(tab, link)
+        for dropped in [1.0, 2.0, 2.9] {
+            seconds = dropped
+            decide(tab, link)
+        }
+        seconds = 3
+        decide(tab, link)
+        #expect(seen.alerts.count == 2)
+    }
+    @Test func openStartsNoPause() {
+        let (tab, seen) = make()
+        decide(tab, link)
+        decide(tab, link)
+        #expect(seen.alerts.count == 2)
+    }
+    @Test func aCancelInOneTabLeavesTheOthersAsking() {
+        let (tab, _) = make(answer: .alertSecondButtonReturn)
+        let (other, seen) = make()
+        decide(tab, link)
+        decide(other, link)
+        #expect(seen.alerts.count == 1)
+    }
+    @Test func aPageThatNeverStopsAskingGetsOneSheet() async throws {
+        let (tab, seen) = make(answer: .alertSecondButtonReturn)
+        let frozen = Date.now // so a slow run can't outlast the pause
+        tab.now = { frozen }
+        await showPage(in: tab, "<script>setInterval(() => { location = '\(join)' }, 20)</script>")
+        #expect(await eventually { !seen.alerts.isEmpty })
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(seen.alerts.count == 1)
     }
 
     // MARK: Real WebKit

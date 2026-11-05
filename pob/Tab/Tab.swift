@@ -41,6 +41,9 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
     private var errorItems: [WKBackForwardListItem?] = []
     private var arrivedByHistory = false
     private var isOfferingToOpen = false
+    /// When the user last said no. Reserved keys like ⌘W don't reach a window behind a sheet, so a page asking again at once could trap them.
+    private var offerCancelledAt = Date.distantPast
+    private static let offerPause: TimeInterval = 3
     /// Replaceable so a test can make the evaluation refuse to start. The block runs on the main queue.
     var evaluateTrust: (SecTrust, @escaping @Sendable (Bool) -> Void) -> OSStatus = { trust, done in
         SecTrustEvaluateAsyncWithError(trust, .main) { _, valid, _ in done(valid) }
@@ -383,9 +386,9 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
         return url
     }
 
-    /// A page can do this with no click, so it always asks. One sheet at a time, and what arrives while it's up is dropped.
+    /// A page can do this with no click, so it always asks. One sheet at a time, and what arrives while it's up, or just after a Cancel, is dropped.
     private func offerToOpen(_ link: URL) {
-        guard !isOfferingToOpen, let app = appToOpen(link) else { return }
+        guard !isOfferingToOpen, now().timeIntervalSince(offerCancelledAt) >= Self.offerPause, let app = appToOpen(link) else { return }
         isOfferingToOpen = true
         let alert = NSAlert()
         alert.messageText = "Open this link in \(app.deletingPathExtension().lastPathComponent)?"
@@ -394,8 +397,13 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
         alert.addButton(withTitle: "Open")
         alert.addButton(withTitle: "Cancel")
         present(alert) { [weak self] response in
-            self?.isOfferingToOpen = false
-            if response == .alertFirstButtonReturn { self?.openInApp(link) }
+            guard let self else { return }
+            isOfferingToOpen = false
+            if response == .alertFirstButtonReturn {
+                openInApp(link)
+            } else if response == .alertSecondButtonReturn { // no window answers `.cancel`, and nobody said no
+                offerCancelledAt = now()
+            }
         }
     }
 
