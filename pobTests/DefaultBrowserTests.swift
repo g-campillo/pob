@@ -164,6 +164,15 @@ import WebKit
         let alerted = await wentModal { await app.makeDefaultBrowser(keyWindow: nil) }
         #expect(alerted)
     }
+    @Test func theSwitcherRowRunsIt() async {
+        let app = makeApp()
+        var asked: [String] = []
+        app.requestDefault = { asked.append($0) }
+        app.restoreSession()
+        let row = SwitcherRow(target: .command(.makeDefaultBrowser), title: "Make pob the Default Browser", subtitle: "", section: "Commands")
+        app.windows[0].switcher.onChoose?(row)
+        #expect(await eventually { asked == ["http", "https"] })
+    }
     @Test func theCommandReachesItWithNoWindow() async {
         let app = makeApp()
         var asked: [String] = []

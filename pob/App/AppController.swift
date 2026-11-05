@@ -159,6 +159,10 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
         controller.onTabsChanged = { [weak self] in self?.saveSessionSoon() }
         controller.onNewWindow = { [weak self, weak controller] in self?.openWindow(restoring: nil, cascadingFrom: controller?.window) }
+        controller.onMakeDefaultBrowser = { [weak self, weak controller] in
+            guard let self else { return }
+            Task { await self.makeDefaultBrowser(keyWindow: controller?.window) }
+        }
         controller.onClose = { [weak self, weak controller] in
             self?.windows.removeAll { $0 === controller }
             self?.saveSessionSoon()

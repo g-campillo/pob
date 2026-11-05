@@ -18,6 +18,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
     var onClose: (() -> Void)?
     /// `AppController` owns the windows, and the switcher's New Window row starts here.
     var onNewWindow: (() -> Void)?
+    var onMakeDefaultBrowser: (() -> Void)?
 
     private let appearance: AppearanceModel
     private let contentView = NSView()
@@ -143,7 +144,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         case .zoomOut: tab?.zoomOut()
         case .actualSize: tab?.actualSize()
         case .newWindow: onNewWindow?()
-        case .makeDefaultBrowser: break // AppController takes it before it gets here
+        case .makeDefaultBrowser: onMakeDefaultBrowser?() // the switcher and the address bar reach it from here
         case .screenRecordingSettings: openURL(Permissions.screenRecordingSettingsURL)
         case .resetSitePermissions:
             guard let tab, let host = tab.webView.url?.host() else { return }
