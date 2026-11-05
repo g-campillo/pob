@@ -10,6 +10,8 @@ final class TabManager {
     var onLoadFinished: ((Tab) -> Void)?
     /// Only the active tab's loading, so a background page never shows.
     var onActiveProgress: ((Double, Bool) -> Void)?
+    /// Replaceable so tests can see whether a page asked for its icon.
+    var updateFavicon: (FaviconStore, String, WKWebView) async -> Void = { await $0.update(host: $1, from: $2) }
     /// Replaceable because tests can't start a real capture.
     var isCapturing: (Tab) -> Bool = { $0.isCapturing }
 
@@ -110,7 +112,7 @@ final class TabManager {
                 record.title = tab.title.isEmpty ? record.title : tab.title
             }
             onChange?()
-            if let url = tab.webView.url, Self.isRecordable(url), !tab.title.isEmpty, recordedTitles[id] != tab.title {
+            if !tab.isShowingErrorPage, let url = tab.webView.url, Self.isRecordable(url), !tab.title.isEmpty, recordedTitles[id] != tab.title {
                 recordedTitles[id] = tab.title
                 Task { [history = profile.history, title = tab.title] in await history.updateTitle(url: url, title: title) }
             }
@@ -152,7 +154,7 @@ final class TabManager {
         guard let url = tab.webView.url, Self.isRecordable(url), let host = url.host() else { return }
         Task { [weak self, weak tab] in
             guard let self, let webView = tab?.webView else { return }
-            await profile.favicons.update(host: host, from: webView)
+            await updateFavicon(profile.favicons, host, webView)
             onChange?()
         }
     }
@@ -179,6 +181,11 @@ final class TabManager {
                 setPhase(.active, of: active.id)
             }
             onActiveChange?()
+            // A certificate question that a window-less tab couldn't ask comes back now that the tab has a window.
+            if let retry = activeTab?.retryURL {
+                activeTab?.retryURL = nil
+                activeTab?.load(.url(retry))
+            }
         }
         onChange?()
     }
@@ -212,9 +219,7 @@ final class TabManager {
     private func capture(_ tab: Tab, in record: inout TabRecord) {
         record.url = tab.webView.url ?? record.url
         record.title = tab.title.isEmpty ? record.title : tab.title
-        if tab.isShowingErrorPage {
-            record.interactionState = nil // the address stays, so a restore tries the real page again
-        } else if record.interactionState == nil || !tab.webView.isLoading {
+        if record.interactionState == nil || !tab.webView.isLoading {
             record.interactionState = tab.webView.interactionState as? Data ?? record.interactionState
         }
     }

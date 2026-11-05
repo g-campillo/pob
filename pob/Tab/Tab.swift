@@ -19,6 +19,21 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     private var observations: [NSKeyValueObservation] = []
     private var errorNavigation: WKNavigation?
+    /// Tests answer the alerts through this, because a sheet needs a window on screen.
+    var alertSeam: ((NSAlert) -> NSApplication.ModalResponse)?
+    /// The main-frame address last asked for, which is what a no-window refusal has to retry.
+    var mainFrameURL: URL?
+    /// Set when a certificate question was refused only because the tab had no window. The manager loads it on activation.
+    var retryURL: URL?
+    /// The network layer retries a refused connection, so a refusal holds until the next page or the load's end.
+    private var refusedHosts: Set<String> = []
+    /// Back-forward items that hold an error page, which WebKit restores from its cache as if they were real pages.
+    private var errorItems: [WKBackForwardListItem?] = []
+    private var arrivedByHistory = false
+    /// Replaceable so a test can make the evaluation refuse to start. The block runs on the main queue.
+    var evaluateTrust: (SecTrust, @escaping @Sendable (Bool) -> Void) -> OSStatus = { trust, done in
+        SecTrustEvaluateAsyncWithError(trust, .main) { _, valid, _ in done(valid) }
+    }
     private var crashRecovery = CrashRecovery()
     /// Replaceable because tests can't wait ten seconds.
     var now: () -> Date = { .now }
@@ -100,9 +115,15 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
     ) {
+        arrivedByHistory = navigationAction.navigationType == .backForward
+        if navigationAction.targetFrame?.isMainFrame == true { mainFrameURL = navigationAction.request.url }
         if navigationAction.navigationType == .linkActivated, navigationAction.modifierFlags.contains(.command) {
             onOpenLink?(navigationAction.request, false)
             decisionHandler(.cancel)
+        } else if isShowingErrorPage, navigationAction.navigationType == .linkActivated, navigationAction.request.url == webView.url {
+            // Retry to the page's own address plus a fragment would only scroll.
+            decisionHandler(.cancel)
+            webView.reload()
         } else {
             decisionHandler(navigationAction.shouldPerformDownload ? .download : .allow)
         }
@@ -111,10 +132,21 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         // Only the blank page shows the desktop. Pages with no background of their own get a normal one.
         PrivateAPI.setDrawsBackground(webView, webView.url?.scheme != "about")
-        isShowingErrorPage = navigation != nil && navigation === errorNavigation
+        let item = webView.backForwardList.currentItem
+        if navigation != nil, navigation === errorNavigation {
+            errorItems.append(item)
+            isShowingErrorPage = true
+        } else if arrivedByHistory, errorItems.contains(where: { $0 === item }) {
+            isShowingErrorPage = true
+            webView.reload()
+        } else {
+            isShowingErrorPage = false
+        }
+        refusedHosts = []
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        refusedHosts = []
         showErrorPage(for: error)
     }
 
@@ -154,10 +186,11 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
             answer(challenge, trustIsValid: true, completionHandler)
             return
         }
-        // Evaluation can reach the network, so it stays off the main thread.
-        SecTrustEvaluateAsyncWithError(trust, DispatchQueue.global()) { _, valid, _ in
-            Task { @MainActor in self.answer(challenge, trustIsValid: valid, completionHandler) }
+        // The header requires the call to come from the queue it answers on. The evaluation itself runs in trustd.
+        let status = evaluateTrust(trust) { valid in
+            MainActor.assumeIsolated { self.answer(challenge, trustIsValid: valid, completionHandler) }
         }
+        if status != errSecSuccess { answer(challenge, trustIsValid: false, completionHandler) }
     }
 
     /// Calls `completion` exactly once on every path.
@@ -180,7 +213,23 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
         case .askForPassword:
             askForPassword(challenge, completion)
         case .askAboutCertificate:
-            askAboutCertificate(challenge, completion)
+            if refusedHosts.contains(space.host) {
+                completion(.cancelAuthenticationChallenge, nil)
+            } else if alertSeam == nil, webView.window == nil {
+                // A background tab can't show the question, so it asks again when the tab is activated, and remembers nothing.
+                if mainFrameURL?.host() == space.host { retryURL = mainFrameURL }
+                completion(.cancelAuthenticationChallenge, nil)
+            } else {
+                askAboutCertificate(challenge, completion)
+            }
+        }
+    }
+
+    private func present(_ alert: NSAlert, completion: @escaping @MainActor (NSApplication.ModalResponse) -> Void) {
+        if let alertSeam {
+            completion(alertSeam(alert))
+        } else {
+            alert.present(in: webView.window, completion: completion)
         }
     }
 
@@ -206,7 +255,7 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
         alert.accessoryView = fields
         alert.addButton(withTitle: "Sign In")
         alert.addButton(withTitle: "Cancel")
-        alert.present(in: webView.window) { response in
+        present(alert) { response in
             if response == .alertFirstButtonReturn {
                 completion(.useCredential, URLCredential(user: user.stringValue, password: password.stringValue, persistence: .forSession))
             } else {
@@ -226,10 +275,10 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
         alert.informativeText = "pob can't confirm this is the real site. Allow it only if you trust it, for example on a local development server."
         alert.addButton(withTitle: "Go Back")
         alert.addButton(withTitle: "Allow This Site")
-        alert.present(in: webView.window) { [weak self] response in
+        present(alert) { [weak self] response in
             guard response == .alertSecondButtonReturn, let self, let trust = space.serverTrust else {
+                self?.refusedHosts.insert(space.host)
                 completion(.cancelAuthenticationChallenge, nil)
-                if self?.webView.canGoBack == true { self?.webView.goBack() }
                 return
             }
             profile.siteSettings[space.host].allowsInvalidCertificate = true

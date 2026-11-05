@@ -18,7 +18,7 @@ enum ErrorPage {
     /// Cancelled loads are the user's own doing, and WebKit's "frame load interrupted" is how a download starts.
     static func shouldShow(_ error: Error) -> Bool {
         let error = error as NSError
-        if error.domain == NSURLErrorDomain { return error.code != NSURLErrorCancelled }
+        if error.domain == NSURLErrorDomain { return error.code != NSURLErrorCancelled && error.code != NSURLErrorUnsupportedURL }
         if error.domain == "WebKitErrorDomain" { return error.code != 102 && error.code != 204 }
         return true
     }

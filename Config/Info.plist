@@ -16,6 +16,11 @@
 	<string>1</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
+	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Sites can use your camera for calls.</string>
 	<key>NSMicrophoneUsageDescription</key>
