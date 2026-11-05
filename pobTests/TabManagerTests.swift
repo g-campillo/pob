@@ -297,6 +297,16 @@ import WebKit
         #expect(tabs.activeTab === tab)
         #expect(tabs.liveTab(tabs.list.records[1].id)?.webView.url == url)
     }
+    /// The certificate question trusts `mainFrameURL`, and this link goes to another tab. A page can't fake the flag, so only a click gets here.
+    @Test func commandClickingALinkLeavesThePageWhereItIs() {
+        let tabs = manager()
+        let tab = tabs.newTab(nil, activate: true)
+        let page = URL(string: "https://page.example/")!
+        tab.mainFrameURL = page
+        let action = FakeNavigationAction(url: URL(string: "https://localhost/next")!, type: .linkActivated, modifiers: .command, target: FakeMainFrame())
+        tab.webView(tab.webView, decidePolicyFor: action) { _ in }
+        #expect(tab.mainFrameURL == page)
+    }
     @Test(arguments: [
         (WKNavigationType.linkActivated, NSEvent.ModifierFlags(), false, WKNavigationActionPolicy.allow),
         (WKNavigationType.other, NSEvent.ModifierFlags.command, false, WKNavigationActionPolicy.allow),
@@ -392,12 +402,14 @@ private final class FakeNavigationAction: WKNavigationAction {
     private let type: WKNavigationType
     private let modifiers: NSEvent.ModifierFlags
     private let shouldDownload: Bool
+    private let target: WKFrameInfo?
 
-    init(url: URL, type: WKNavigationType, modifiers: NSEvent.ModifierFlags, shouldDownload: Bool = false) {
+    init(url: URL, type: WKNavigationType, modifiers: NSEvent.ModifierFlags, shouldDownload: Bool = false, target: WKFrameInfo? = nil) {
         self.url = url
         self.type = type
         self.modifiers = modifiers
         self.shouldDownload = shouldDownload
+        self.target = target
         super.init()
         _ = Unmanaged.passRetained(self)
     }
@@ -406,6 +418,16 @@ private final class FakeNavigationAction: WKNavigationAction {
     override var navigationType: WKNavigationType { type }
     override var modifierFlags: NSEvent.ModifierFlags { modifiers }
     override var shouldPerformDownload: Bool { shouldDownload }
+    override var targetFrame: WKFrameInfo? { target }
+}
+
+/// Kept for the same reason as `FakeNavigationAction`.
+private final class FakeMainFrame: WKFrameInfo {
+    override init() {
+        super.init()
+        _ = Unmanaged.passRetained(self)
+    }
+    override var isMainFrame: Bool { true }
 }
 
 /// Kept for the same reason as `FakeNavigationAction`.

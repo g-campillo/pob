@@ -56,11 +56,13 @@ private func fields(of alert: NSAlert) -> [NSTextField] { alert.accessoryView?.s
 @Suite struct TrustPathTests {
     @Test(.timeLimit(.minutes(1))) func anInvalidCertificateWithNoWindowIsRefusedAndNotRemembered() async {
         let tab = Tab(profile: .temporary())
+        tab.mainFrameURL = URL(string: "https://bad.example/")!
         #expect(await answer(tab, badCertificate(host: "bad.example")).disposition == .cancelAuthenticationChallenge)
         #expect(tab.profile.siteSettings["bad.example"].allowsInvalidCertificate == nil)
     }
     @Test(.timeLimit(.minutes(1))) func anEvaluationThatCantStartStillAnswersTheChallengeOnce() async {
         let tab = Tab(profile: .temporary())
+        tab.mainFrameURL = URL(string: "https://dev.example/")!
         tab.evaluateTrust = { _, _ in errSecParam }
         tab.profile.siteSettings["dev.example"].allowsInvalidCertificate = nil
         #expect(await answer(tab, badCertificate(host: "dev.example")).disposition == .cancelAuthenticationChallenge)
@@ -77,13 +79,45 @@ private func fields(of alert: NSAlert) -> [NSTextField] { alert.accessoryView?.s
     }
     @Test(.timeLimit(.minutes(1))) func allowThisSiteRemembersTheHostAndTrustsIt() async {
         let tab = Tab(profile: .temporary())
+        tab.mainFrameURL = URL(string: "https://dev.example/path")!
         tab.alertSeam = { _ in .alertSecondButtonReturn }
         let result = await answer(tab, badCertificate(host: "dev.example"))
         #expect(result.disposition == .useCredential)
         #expect(tab.profile.siteSettings["dev.example"].allowsInvalidCertificate == true)
     }
+    /// WebKit asks about everything in a page, and a page mustn't get a forged certificate for another site trusted for good.
+    @Test(.timeLimit(.minutes(1))) func aBadCertificateOnAnotherHostIsRefusedWithoutAsking() async {
+        let tab = Tab(profile: .temporary())
+        tab.mainFrameURL = URL(string: "https://example.com/")!
+        var asked = 0
+        tab.alertSeam = { _ in asked += 1; return .alertSecondButtonReturn }
+        #expect(await answer(tab, badCertificate(host: "expired.badssl.com")).disposition == .cancelAuthenticationChallenge)
+        #expect(asked == 0)
+        #expect(tab.profile.siteSettings["expired.badssl.com"].allowsInvalidCertificate == nil)
+    }
+    @Test(.timeLimit(.minutes(1))) func aHostAlreadyAllowedStaysTrustedInsideAnotherPage() async {
+        let tab = Tab(profile: .temporary())
+        tab.mainFrameURL = URL(string: "https://example.com/")!
+        tab.profile.siteSettings["dev.example"].allowsInvalidCertificate = true
+        var asked = 0
+        tab.alertSeam = { _ in asked += 1; return .alertFirstButtonReturn }
+        #expect(await answer(tab, badCertificate(host: "dev.example")).disposition == .useCredential)
+        #expect(asked == 0)
+    }
+    /// `load` preconnects, so the first challenge can beat the policy call that names the page. The load itself asks again.
+    @Test(.timeLimit(.minutes(1))) func aPreconnectBeforeThePageIsNamedIsRefusedAndTheLoadStillAsks() async {
+        let tab = Tab(profile: .temporary())
+        var asked = 0
+        tab.alertSeam = { _ in asked += 1; return .alertSecondButtonReturn }
+        #expect(await answer(tab, badCertificate(host: "dev.example")).disposition == .cancelAuthenticationChallenge)
+        #expect(asked == 0)
+        tab.mainFrameURL = URL(string: "https://dev.example/")!
+        #expect(await answer(tab, badCertificate(host: "dev.example")).disposition == .useCredential)
+        #expect(asked == 1)
+    }
     @Test(.timeLimit(.minutes(1))) func oneRefusalAsksOnceEvenWhenTheConnectionRetries() async {
         let tab = Tab(profile: .temporary())
+        tab.mainFrameURL = URL(string: "https://dev.example/")!
         var asked = 0
         tab.alertSeam = { _ in asked += 1; return .alertFirstButtonReturn }
         let first = await answer(tab, badCertificate(host: "dev.example"))
@@ -150,12 +184,14 @@ private func fields(of alert: NSAlert) -> [NSTextField] { alert.accessoryView?.s
             await finishLoading(tab) { tab.webView.loadFileURL(folder.appending(path: "\(name).html"), allowingReadAccessTo: folder) }
         }
         #expect(tab.webView.canGoBack)
+        tab.mainFrameURL = URL(string: "https://dev.example/")!
         _ = await answer(tab, badCertificate(host: "dev.example"))
         try? await Task.sleep(for: .milliseconds(400))
         #expect(tab.webView.url?.lastPathComponent == "2.html" && !tab.webView.canGoForward)
     }
     private func refusedTwice(_ clear: (Tab) async -> Void) async -> Int {
         let tab = Tab(profile: .temporary())
+        tab.mainFrameURL = URL(string: "https://dev.example/")!
         var asked = 0
         tab.alertSeam = { _ in asked += 1; return .alertFirstButtonReturn }
         _ = await answer(tab, badCertificate(host: "dev.example"))
@@ -165,7 +201,7 @@ private func fields(of alert: NSAlert) -> [NSTextField] { alert.accessoryView?.s
     }
     @Test(.timeLimit(.minutes(1))) func aRefusalIsForgottenWhenAPageCommits() async {
         let asked = await refusedTwice { tab in
-            await finishLoading(tab) { tab.webView.loadHTMLString("<p>x</p>", baseURL: URL(string: "https://localhost/")) }
+            await finishLoading(tab) { tab.webView.loadHTMLString("<p>x</p>", baseURL: URL(string: "https://dev.example/")) }
         }
         #expect(asked == 2)
     }
@@ -175,6 +211,21 @@ private func fields(of alert: NSAlert) -> [NSTextField] { alert.accessoryView?.s
             tab.webView(tab.webView, didFailProvisionalNavigation: nil, withError: URLError(.cancelled))
         }
         #expect(asked == 2)
+    }
+    private let page = URL(string: "https://page.example/")!
+    private func pageWith(_ html: String) async -> Tab {
+        let tab = Tab(profile: .temporary())
+        await finishLoading(tab) { tab.webView.loadSimulatedRequest(URLRequest(url: page), responseHTML: html) }
+        return tab
+    }
+    /// The certificate question trusts `mainFrameURL`, so a page mustn't be able to point it at a host it never goes to.
+    @Test(.timeLimit(.minutes(1))) func aDownloadLeavesThePageWhereItIs() async throws {
+        let tab = await pageWith(#"<a href="data:text/plain,x" download="x.txt">x</a>"#)
+        var downloading = false
+        tab.onBecameDownload = { downloading = true }
+        _ = try await tab.webView.evaluateJavaScript("document.querySelector('a').click(); 1")
+        #expect(await eventually { downloading })
+        #expect(tab.mainFrameURL == page)
     }
     @Test(.timeLimit(.minutes(1))) func aPasswordIsAskedForByHostAndKeptForTheSession() async throws {
         let tab = Tab(profile: .temporary())

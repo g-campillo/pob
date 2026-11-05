@@ -27,7 +27,7 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
     var deviceAccess: (PermissionKind) -> Bool = { Permissions.macOSAllows($0) }
     /// Replaceable so a test can't open System Settings.
     var openSettings: @MainActor (URL) -> Void = { NSWorkspace.shared.open($0) }
-    /// The main-frame address last asked for, which is what a no-window refusal has to retry.
+    /// The main-frame address last going ahead, which is what a no-window refusal has to retry and what a certificate question has to be about.
     var mainFrameURL: URL?
     /// Set when a certificate question was refused only because the tab had no window. The manager loads it on activation.
     var retryURL: URL?
@@ -164,7 +164,6 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
         decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
     ) {
         arrivedByHistory = navigationAction.navigationType == .backForward
-        if navigationAction.targetFrame?.isMainFrame == true { mainFrameURL = navigationAction.request.url }
         if navigationAction.navigationType == .linkActivated, navigationAction.modifierFlags.contains(.command) {
             onOpenLink?(navigationAction.request, false)
             decisionHandler(.cancel)
@@ -172,8 +171,11 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
             // Retry to the page's own address plus a fragment would only scroll.
             decisionHandler(.cancel)
             webView.reload()
+        } else if navigationAction.shouldPerformDownload {
+            decisionHandler(.download)
         } else {
-            decisionHandler(navigationAction.shouldPerformDownload ? .download : .allow)
+            if navigationAction.targetFrame?.isMainFrame == true { mainFrameURL = navigationAction.request.url }
+            decisionHandler(.allow)
         }
     }
 
@@ -285,11 +287,17 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
         case .askForPassword:
             askForPassword(challenge, completion)
         case .askAboutCertificate:
+            // WebKit asks about everything a page loads, and Allow lasts, so a page can't raise this about another host.
+            // `load` preconnects, which can beat the policy call that names the page, but then the load itself asks again.
+            guard space.host == mainFrameURL?.host() else {
+                completion(.cancelAuthenticationChallenge, nil)
+                return
+            }
             if refusedHosts.contains(space.host) {
                 completion(.cancelAuthenticationChallenge, nil)
             } else if alertSeam == nil, webView.window == nil {
                 // A background tab can't show the question, so it asks again when the tab is activated, and remembers nothing.
-                if mainFrameURL?.host() == space.host { retryURL = mainFrameURL }
+                retryURL = mainFrameURL
                 completion(.cancelAuthenticationChallenge, nil)
             } else {
                 askAboutCertificate(challenge, completion)
