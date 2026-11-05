@@ -23,6 +23,10 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
     private var errorNavigation: WKNavigation?
     /// Tests answer the alerts through this, because a sheet needs a window on screen.
     var alertSeam: ((NSAlert) -> NSApplication.ModalResponse)?
+    /// Replaceable so tests don't depend on this Mac's camera, microphone and location settings.
+    var deviceAccess: (PermissionKind) -> Bool = { Permissions.macOSAllows($0) }
+    /// Replaceable so a test can't open System Settings.
+    var openSettings: @MainActor (URL) -> Void = { NSWorkspace.shared.open($0) }
     /// The main-frame address last asked for, which is what a no-window refusal has to retry.
     var mainFrameURL: URL?
     /// Set when a certificate question was refused only because the tab had no window. The manager loads it on activation.
@@ -384,7 +388,26 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
         type: WKMediaCaptureType,
         decisionHandler: @escaping @MainActor (WKPermissionDecision) -> Void
     ) {
-        Permissions.ask(host: origin.host, type: type, in: webView.window, decision: decisionHandler)
+        decide(kinds: Permissions.kinds(for: type), originHost: origin.host, decision: decisionHandler)
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        requestGeolocationPermissionFor origin: WKSecurityOrigin,
+        initiatedByFrame frame: WKFrameInfo,
+        decisionHandler: @escaping @MainActor (WKPermissionDecision) -> Void
+    ) {
+        decide(kinds: [.location], originHost: origin.host, decision: decisionHandler)
+    }
+
+    /// Answers are kept under the page's own host, so Reset works for the page in view and an embedded frame can't reuse a grant.
+    func decide(kinds: [PermissionKind], originHost: String, decision: @escaping @MainActor (WKPermissionDecision) -> Void) {
+        let host = webView.url?.host() ?? originHost
+        Permissions.resolve(
+            kinds: kinds, host: host, text: Permissions.promptText(host: host, kinds: kinds), settings: profile.siteSettings,
+            macOSAllows: deviceAccess,
+            present: { [self] alert, completion in present(alert, completion: completion) },
+            openSettings: openSettings, decision: decision)
     }
 
     func webView(

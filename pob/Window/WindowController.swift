@@ -97,6 +97,9 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         window.invalidateShadow()
     }
 
+    /// Replaceable so a test can't open System Settings.
+    var openURL: (URL) -> Void = { NSWorkspace.shared.open($0) }
+
     func perform(_ id: CommandID) {
         if !switcher.isHidden, id != .openSwitcher, id != .openSwitcherFromPage {
             // Commands act on the window, and several of them move the keyboard, so the panel can't stay up over them.
@@ -140,6 +143,11 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         case .zoomOut: tab?.zoomOut()
         case .actualSize: tab?.actualSize()
         case .newWindow: onNewWindow?()
+        case .screenRecordingSettings: openURL(Permissions.screenRecordingSettingsURL)
+        case .resetSitePermissions:
+            guard let tab, let host = tab.webView.url?.host() else { return }
+            Permissions.forget(host: host, in: tab.profile.siteSettings)
+            tab.webView.reload()
         case .toggleRail:
             railState.toggleShortcut()
             if railState.visibility == .hidden {

@@ -9,6 +9,7 @@ import Testing
         "webView:createWebViewWithConfiguration:forNavigationAction:windowFeatures:",
         "webViewDidClose:",
         "webView:requestMediaCapturePermissionForOrigin:initiatedByFrame:type:decisionHandler:",
+        "webView:requestGeolocationPermissionForOrigin:initiatedByFrame:decisionHandler:",
         "webView:runJavaScriptAlertPanelWithMessage:initiatedByFrame:completionHandler:",
         "webView:runJavaScriptConfirmPanelWithMessage:initiatedByFrame:completionHandler:",
         "webView:runJavaScriptTextInputPanelWithPrompt:defaultText:initiatedByFrame:completionHandler:",

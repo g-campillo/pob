@@ -25,6 +25,8 @@
 	<string>Sites can use your camera for calls.</string>
 	<key>NSDownloadsFolderUsageDescription</key>
 	<string>Saves the files you download.</string>
+	<key>NSLocationUsageDescription</key>
+	<string>Sites can ask for your location.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Sites can use your microphone for calls.</string>
 </dict>

@@ -287,11 +287,34 @@ import WebKit
     @Test func commandsAreSafeWithNoTabs() {
         let tabs = emptyTabs()
         let (controller, _) = make(tabs)
+        controller.openURL = { _ in } // Screen Recording Settings would open the real System Settings
         for command in CommandID.allCases {
             controller.perform(command)
         }
         #expect(tabs.isEmpty)
         #expect(controller.tab == nil)
+    }
+    @Test func screenRecordingSettingsOpensItsPane() {
+        let (controller, _) = make()
+        var opened: [URL] = []
+        controller.openURL = { opened.append($0) }
+        controller.perform(.screenRecordingSettings)
+        #expect(opened == [Permissions.screenRecordingSettingsURL])
+    }
+    @Test func resettingPermissionsForgetsThisSiteOnly() async throws {
+        let (controller, _) = make()
+        let tab = try #require(controller.tab)
+        await finishLoading(tab) { tab.webView.loadHTMLString("<p>x</p>", baseURL: URL(string: "https://localhost/")) }
+        let store = tab.profile.siteSettings
+        Permissions.remember(false, kinds: [.camera], host: "localhost", in: store)
+        Permissions.remember(false, kinds: [.camera], host: "other.com", in: store)
+        store["localhost"].allowsInvalidCertificate = true
+        store["localhost"].zoom = 1.25
+        await finishLoading(tab) { controller.perform(.resetSitePermissions) }
+        #expect(Permissions.remembered([.camera], host: "localhost", in: store) == nil)
+        #expect(store["localhost"].allowsInvalidCertificate == nil)
+        #expect(store["localhost"].zoom == 1.25)
+        #expect(Permissions.remembered([.camera], host: "other.com", in: store) == false)
     }
     @Test func closingTheLastTabClosesTheWindow() async throws {
         let (controller, _) = make()
