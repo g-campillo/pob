@@ -129,6 +129,25 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
         }
     }
 
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationResponse: WKNavigationResponse,
+        decisionHandler: @escaping @MainActor (WKNavigationResponsePolicy) -> Void
+    ) {
+        // Like Safari, an attachment downloads even when WebKit could show it.
+        let disposition = (navigationResponse.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition")
+        let isAttachment = disposition?.trimmingCharacters(in: .whitespaces).lowercased().hasPrefix("attachment") == true
+        decisionHandler(isAttachment || !navigationResponse.canShowMIMEType ? .download : .allow)
+    }
+
+    func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        profile.downloads.track(download)
+    }
+
+    func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+        profile.downloads.track(download)
+    }
+
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         // Only the blank page shows the desktop. Pages with no background of their own get a normal one.
         PrivateAPI.setDrawsBackground(webView, webView.url?.scheme != "about")

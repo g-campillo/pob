@@ -272,6 +272,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         rail.onPointerExit = { [weak self] in self?.scheduleRailClose() }
         rail.onNavigate = { [weak self] in self?.perform($0) }
         rail.onSettings = { [weak self] in self?.showAppearancePopover() }
+        rail.onDownloads = { [weak self] in self?.showDownloadsPopover() }
         rail.onAddressFocus = { [weak self] in
             guard let self else { return }
             railState.beginEditingAddress()
@@ -479,6 +480,20 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
 
     private func showAppearancePopover() {
         showPopover(AppearancePopover(model: appearance), from: rail.settingsButton)
+    }
+
+    private func showDownloadsPopover() {
+        let downloads = tabs.profile.downloads
+        let popover = DownloadsPopover(downloads: downloads) { [weak self] id in
+            guard let webView = self?.tab?.webView else { return } // no page to start it from
+            downloads.retry(id, in: webView)
+        }
+        showPopover(popover, from: rail.downloadsButton)
+    }
+
+    /// A download's name, in the pill.
+    func showNotice(_ text: String) {
+        pill.showNotice(text)
     }
 
     private func showSignInPopover() {

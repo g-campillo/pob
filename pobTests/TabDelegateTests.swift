@@ -19,6 +19,9 @@ import Testing
         "webView:didFailNavigation:withError:",
         "webViewWebContentProcessDidTerminate:",
         "webView:didReceiveAuthenticationChallenge:completionHandler:",
+        "webView:decidePolicyForNavigationResponse:decisionHandler:",
+        "webView:navigationAction:didBecomeDownload:",
+        "webView:navigationResponse:didBecomeDownload:",
     ])
     func webKitCanReachDelegateMethod(selector: String) {
         #expect(Tab(profile: .temporary()).responds(to: NSSelectorFromString(selector)))

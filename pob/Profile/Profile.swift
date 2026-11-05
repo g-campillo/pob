@@ -19,7 +19,11 @@ final class Profile {
 
     lazy var session = SessionStore(file: JSONFile(url: directory.appending(path: "session.json")))
 
+    /// Shared by every window. A temporary profile keeps its downloads in its own folder.
+    lazy var downloads = Downloads(directory: downloadsDirectory)
+
     private let faviconDirectory: URL
+    private let downloadsDirectory: URL
 
     /// Built ahead of time, so a new tab doesn't wait for a web view.
     private(set) var spareTab: Tab?
@@ -28,18 +32,20 @@ final class Profile {
         id: UUID(uuidString: "6F0B5C2E-2F4B-4C6E-9B52-1F6B0A5D7C11")!,
         directory: URL.applicationSupportDirectory.appending(path: "pob/profiles/6F0B5C2E-2F4B-4C6E-9B52-1F6B0A5D7C11", directoryHint: .isDirectory),
         isPersistent: true,
-        faviconDirectory: URL.applicationSupportDirectory.appending(path: "pob/favicons", directoryHint: .isDirectory)
+        faviconDirectory: URL.applicationSupportDirectory.appending(path: "pob/favicons", directoryHint: .isDirectory),
+        downloadsDirectory: URL.downloadsDirectory
     )
 
     /// Private data store and a unique temp folder, for tests.
     static func temporary() -> Profile {
         let id = UUID()
         let directory = FileManager.default.temporaryDirectory.appending(path: "pob-\(id.uuidString)", directoryHint: .isDirectory)
-        return Profile(id: id, directory: directory, isPersistent: false, faviconDirectory: directory.appending(path: "favicons", directoryHint: .isDirectory))
+        return Profile(id: id, directory: directory, isPersistent: false, faviconDirectory: directory.appending(path: "favicons", directoryHint: .isDirectory), downloadsDirectory: directory.appending(path: "Downloads", directoryHint: .isDirectory))
     }
 
-    private init(id: UUID, directory: URL, isPersistent: Bool, faviconDirectory: URL) {
+    private init(id: UUID, directory: URL, isPersistent: Bool, faviconDirectory: URL, downloadsDirectory: URL) {
         self.faviconDirectory = faviconDirectory
+        self.downloadsDirectory = downloadsDirectory
         self.id = id
         self.directory = directory
         self.isPersistent = isPersistent

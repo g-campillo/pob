@@ -41,6 +41,10 @@ final class AppController: NSObject, NSApplicationDelegate {
         guard !Self.isRunningTests else { return }
 
         profile = .initial
+        // Every window shares the profile's downloads, so only the key window shows the notice.
+        Profile.initial.downloads.onStart = { [weak self] name in
+            self?.controller(of: NSApp.keyWindow)?.showNotice(name)
+        }
         Task { await Profile.initial.history.prune(before: Date().addingTimeInterval(-365 * 86_400)) }
 
         let appearance = AppearanceModel(

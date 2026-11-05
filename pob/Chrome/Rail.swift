@@ -10,6 +10,7 @@ final class Rail: NSView, NSTextFieldDelegate {
     var onSubmit: ((String) -> Void)?
     var onCancel: (() -> Void)?
     var onSettings: (() -> Void)?
+    var onDownloads: (() -> Void)?
     var onNavigate: ((CommandID) -> Void)?
     var onAddressFocus: (() -> Void)?
     var onAddressChange: ((String) -> Void)?
@@ -21,6 +22,8 @@ final class Rail: NSView, NSTextFieldDelegate {
     let suggestions = SwitcherList(selectsFirstRow: false)
     let pinned = PinnedBookmarksView()
     private(set) lazy var settingsButton = iconButton("gearshape", label: "Settings", action: #selector(settingsPressed))
+
+    private(set) lazy var downloadsButton = iconButton("arrow.down.circle", label: "Downloads", action: #selector(downloadsPressed))
 
     private lazy var backButton = iconButton("chevron.left", label: "Back", action: #selector(backPressed))
     private lazy var forwardButton = iconButton("chevron.right", label: "Forward", action: #selector(forwardPressed))
@@ -141,7 +144,7 @@ final class Rail: NSView, NSTextFieldDelegate {
 
         let bottomSpacer = NSView()
         bottomSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let bottomRow = NSStackView(views: [bottomSpacer, settingsButton])
+        let bottomRow = NSStackView(views: [bottomSpacer, downloadsButton, settingsButton])
         bottomRow.orientation = .horizontal
 
         pinned.translatesAutoresizingMaskIntoConstraints = false
@@ -201,6 +204,7 @@ final class Rail: NSView, NSTextFieldDelegate {
     @objc private func forwardPressed() { onNavigate?(.forward) }
     @objc private func reloadPressed() { onNavigate?(.reload) }
     @objc private func settingsPressed() { onSettings?() }
+    @objc private func downloadsPressed() { onDownloads?() }
 }
 
 extension NSView {
