@@ -28,6 +28,18 @@ func writeIcon(forHost host: String, in folder: URL) throws {
     try Data(base64Encoded: tinyPNG)?.write(to: folder.appending(path: FaviconStore.fileName(forHost: host)))
 }
 
+/// What a table says to a screen reader, row by row. Its rows are AppKit's stand-ins, which answer only the old attribute call,
+/// and walking them is the point: a label on a view that isn't in this tree reads back fine and reaches no one.
+func accessibleRows(of table: NSTableView) -> [(label: String?, isSelected: Bool)] {
+    func value(_ attribute: NSAccessibility.Attribute, of element: Any?) -> Any? {
+        (element as? NSObject)?.perform(NSSelectorFromString("accessibilityAttributeValue:"), with: attribute.rawValue)?.takeUnretainedValue()
+    }
+    return (value(.rows, of: table) as? [Any] ?? []).map { row in
+        let cell = (value(.children, of: row) as? [Any])?.first
+        return (value(.description, of: cell) as? String, value(.selected, of: row) as? Bool == true)
+    }
+}
+
 /// Polls for up to a second.
 func eventually(_ condition: () async -> Bool) async -> Bool {
     for _ in 0..<100 {

@@ -216,6 +216,32 @@ import Testing
         list.moveSelection(by: 1)
         #expect(fills() == 1)
     }
+    @Test func eachRowIsNamedAndTheChosenOneIsSelected() throws {
+        let list = SwitcherList(selectsFirstRow: true)
+        list.frame = NSRect(x: 0, y: 0, width: 300, height: 300)
+        list.show(rows)
+        list.layoutSubtreeIfNeeded()
+        let table = try #require(list.subviewsDeep.compactMap { $0 as? NSTableView }.first)
+        #expect(accessibleRows(of: table).map(\.label) == ["Tabs", "One", "Bookmarks", "Two", "Three"])
+        #expect(accessibleRows(of: table).map(\.isSelected) == [false, true, false, false, false])
+    }
+    /// Cells are recycled between headers and rows, so a name left from the last use would be read out.
+    @Test func aRecycledCellTakesTheNameOfWhatItShowsNow() throws {
+        let list = SwitcherList(selectsFirstRow: true)
+        list.frame = NSRect(x: 0, y: 0, width: 300, height: 300)
+        let window = NSWindow(contentRect: list.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        window.contentView = list
+        list.show(rows)
+        window.displayIfNeeded()
+        let table = try #require(list.subviewsDeep.compactMap { $0 as? NSTableView }.first)
+
+        let renamed = [SwitcherRow(target: .command(.find), title: "Four", subtitle: "", section: "History")] + rows.dropFirst().map {
+            SwitcherRow(target: $0.target, title: $0.title, subtitle: $0.subtitle, section: "")
+        }
+        list.show(renamed)
+        window.displayIfNeeded()
+        #expect(accessibleRows(of: table).map(\.label) == ["History", "Four", "Two", "Three"])
+    }
     @Test func theListNeverTakesTheKeyboard() throws {
         let table = try #require(SwitcherList(selectsFirstRow: true).subviewsDeep.compactMap { $0 as? NSTableView }.first)
         #expect(!table.acceptsFirstResponder)

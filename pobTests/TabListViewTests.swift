@@ -146,6 +146,35 @@ import Testing
         closeButton(of: rows[0])?.performClick(nil)
         #expect(closed == records[1].id)
     }
+    @Test func eachRowIsNamedForItsTabAndTheActiveOneIsSelected() throws {
+        var records = [TabRecord(title: "One"), TabRecord(url: URL(string: "https://two.example/"))]
+        let view = listShowing(records, active: records[1].id)
+        let table = try table(in: view)
+        func spoken() -> [String] { accessibleRows(of: table).map { "\($0.label ?? "nil")\($0.isSelected ? " selected" : "")" } }
+        #expect(spoken() == ["One", "two.example selected"])
+
+        view.update(records: records, activeID: records[0].id)
+        #expect(spoken() == ["One selected", "two.example"])
+
+        records[0].title = "(1) One"
+        view.update(records: records, activeID: records[0].id)
+        #expect(spoken() == ["(1) One selected", "two.example"])
+    }
+    /// Reloading keeps the selected index, and the active tab may not be at that index any more.
+    @Test func theActiveTabStaysSelectedThroughAReorderAndAClose() throws {
+        let records = [TabRecord(title: "One"), TabRecord(title: "Two"), TabRecord(title: "Three")]
+        let view = listShowing(records, active: records[0].id)
+        let table = try table(in: view)
+
+        view.update(records: records.reversed(), activeID: records[0].id)
+        #expect(table.selectedRowIndexes == [2])
+
+        view.update(records: Array(records.dropFirst()), activeID: records[1].id)
+        #expect(table.selectedRowIndexes == [0])
+
+        view.update(records: [], activeID: nil)
+        #expect(table.selectedRowIndexes.isEmpty)
+    }
     /// The title and address stay the same, so only the icon itself can say the row is out of date.
     @Test func aFaviconArrivingRefreshesItsRow() throws {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)

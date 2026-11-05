@@ -326,6 +326,7 @@ private final class SwitcherCell: NSView {
         title.font = .preferredFont(forTextStyle: .caption1)
         title.textColor = .secondaryLabelColor
         subtitle.isHidden = true
+        setAccessibilityLabel(header)
     }
 
     func configure(row: SwitcherRow) {
@@ -334,5 +335,6 @@ private final class SwitcherCell: NSView {
         title.textColor = .labelColor
         subtitle.stringValue = row.subtitle
         subtitle.isHidden = row.subtitle.isEmpty
+        setAccessibilityLabel(row.title)
     }
 }

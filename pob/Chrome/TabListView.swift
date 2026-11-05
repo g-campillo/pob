@@ -98,8 +98,11 @@ final class TabListView: NSView, NSTableViewDataSource, NSTableViewDelegate {
                 (table.view(atColumn: 0, row: index, makeIfNecessary: false) as? TabRow)?.configure(rows[index])
             }
         }
-        if previous.first(where: \.isActive)?.id != activeID, let row = rows.firstIndex(where: \.isActive) {
-            table.scrollRowToVisible(row)
+        let active = rows.firstIndex(where: \.isActive)
+        // Selection draws nothing here. It's how a screen reader hears which tab is active, and a reload leaves it on the old index.
+        table.selectRowIndexes(active.map { IndexSet(integer: $0) } ?? [], byExtendingSelection: false)
+        if previous.first(where: \.isActive)?.id != activeID, let active {
+            table.scrollRowToVisible(active)
         }
     }
 
@@ -233,6 +236,7 @@ private final class TabRow: NSView {
         label.textColor = tab.isActive ? .labelColor : .secondaryLabelColor
         fill.isHidden = !tab.isActive
         tile.image = tab.icon
+        setAccessibilityLabel(tab.title)
     }
 
     /// Not in `configure`, which also runs on the row the pointer may be on.
