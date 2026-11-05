@@ -21,7 +21,7 @@ final class SiteSettings {
     subscript(host: String) -> SiteSetting {
         get { values[host] ?? SiteSetting() }
         set {
-            values[host] = newValue
+            values[host] = newValue == SiteSetting() ? nil : newValue // no empty entries in sites.json
             do { try file.save(values) } catch {
                 Logger(subsystem: "pob", category: "SiteSettings").error("Saving site settings failed: \(error)")
             }

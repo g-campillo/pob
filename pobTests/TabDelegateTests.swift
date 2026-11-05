@@ -14,6 +14,7 @@ import Testing
         "webView:runJavaScriptTextInputPanelWithPrompt:defaultText:initiatedByFrame:completionHandler:",
         "webView:runOpenPanelWithParameters:initiatedByFrame:completionHandler:",
         "webView:didFinishNavigation:",
+        "webView:didCommitNavigation:",
         "webView:decidePolicyForNavigationAction:decisionHandler:",
         "webView:didFailProvisionalNavigation:withError:",
         "webView:didFailNavigation:withError:",

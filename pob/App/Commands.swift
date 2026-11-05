@@ -5,6 +5,7 @@ enum CommandID: String, CaseIterable {
     case toggleInspector, showConsole, showPageSource, openInSafari, signIn, bookmarkPage
     case openSwitcher, openSwitcherFromPage, newWindow, reopenTab, closeTab, closeWindow, nextTab, previousTab
     case selectTab1, selectTab2, selectTab3, selectTab4, selectTab5, selectTab6, selectTab7, selectTab8, selectTab9
+    case find, print, zoomIn, zoomOut, actualSize
 }
 
 struct Command {
@@ -54,6 +55,11 @@ struct CommandList {
             command(.closeWindow, "Close Window", key: "w", modifiers: [.shift, .command], reserved: true),
             command(.nextTab, "Next Tab", key: "\t", modifiers: .control, reserved: true),
             command(.previousTab, "Previous Tab", key: "\t", modifiers: [.control, .shift], reserved: true),
+            command(.find, "Find", key: "f", modifiers: .command),
+            command(.print, "Print…", key: "p", modifiers: .command),
+            command(.zoomIn, "Zoom In", key: "=", modifiers: .command),
+            command(.zoomOut, "Zoom Out", key: "-", modifiers: .command),
+            command(.actualSize, "Actual Size", key: "0", modifiers: .command),
             command(.selectTab1, "Select Tab 1", key: "1", modifiers: .command, reserved: true),
             command(.selectTab2, "Select Tab 2", key: "2", modifiers: .command, reserved: true),
             command(.selectTab3, "Select Tab 3", key: "3", modifiers: .command, reserved: true),

@@ -83,6 +83,46 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
         return url
     }
 
+    /// Whether the text was found. Wraps around the page.
+    func find(_ text: String, backwards: Bool) async -> Bool {
+        let configuration = WKFindConfiguration()
+        configuration.wraps = true
+        configuration.backwards = backwards
+        return (try? await webView.find(text, configuration: configuration).matchFound) ?? false
+    }
+
+    // MARK: Zoom and printing
+
+    /// The zoom is kept per host. Pages with no host (`about:` and the like) change but remember nothing.
+    func setZoom(_ zoom: Double) {
+        webView.pageZoom = zoom
+        guard let host = webView.url?.host() else { return }
+        let saved = zoom == 1 ? nil : zoom // 1 is the default, so it clears the entry
+        if profile.siteSettings[host].zoom != saved { profile.siteSettings[host].zoom = saved }
+    }
+
+    func zoomIn() { setZoom(ZoomLevels.larger(than: webView.pageZoom)) }
+    func zoomOut() { setZoom(ZoomLevels.smaller(than: webView.pageZoom)) }
+    func actualSize() { setZoom(1) }
+
+    /// Replaceable because the print sheet needs a window on screen.
+    var printSeam: ((NSPrintOperation) -> Void)?
+
+    func printOperation() -> NSPrintOperation {
+        let operation = webView.printOperation(with: .shared)
+        operation.view?.frame = webView.bounds
+        return operation
+    }
+
+    func printPage() {
+        let operation = printOperation()
+        if let printSeam {
+            printSeam(operation)
+        } else if let window = webView.window {
+            operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
+        }
+    }
+
     func load(_ input: AddressInput) {
         switch input {
         case .url(let url), .search(let url):
@@ -155,6 +195,7 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         // Only the blank page shows the desktop. Pages with no background of their own get a normal one.
         PrivateAPI.setDrawsBackground(webView, webView.url?.scheme != "about")
+        webView.pageZoom = webView.url?.host().flatMap { profile.siteSettings[$0].zoom } ?? 1
         let item = webView.backForwardList.currentItem
         if navigation != nil, navigation === errorNavigation {
             errorItems.append(item)

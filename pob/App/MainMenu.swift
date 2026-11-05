@@ -7,11 +7,12 @@ enum MainMenu {
             NSMenuItem(title: "Quit pob", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"),
         ])
         addSubmenu("File", to: menu, items: items(
-            for: [.openSwitcher, .newWindow, .reopenTab, .closeTab, .closeWindow],
+            for: [.openSwitcher, .newWindow, .reopenTab, .closeTab, .closeWindow, .print],
             in: commands
         ))
-        addSubmenu("Edit", to: menu, items: editItems())
-        addSubmenu("View", to: menu, items: items(for: [.toggleRail, .snapOpaque], in: commands))
+        addSubmenu("Edit", to: menu, items: editItems() + [.separator()] + items(for: [.find], in: commands))
+        addSubmenu("View", to: menu, items: items(for: [.toggleRail, .snapOpaque], in: commands)
+            + [.separator()] + items(for: [.zoomIn, .zoomOut, .actualSize], in: commands) + [plusZoomItem(in: commands)].compactMap { $0 })
         addSubmenu("Bookmarks", to: menu, items: items(for: [.bookmarkPage], in: commands))
         addSubmenu("Go", to: menu, items: items(
             for: [.back, .forward, .reload, .focusAddress, .openSwitcherFromPage],
@@ -53,6 +54,16 @@ enum MainMenu {
 
     private static func items(for ids: [CommandID], in commands: CommandList) -> [NSMenuItem] {
         ids.compactMap(commands.command).map(menuItem)
+    }
+
+    /// ⌘+ is Shift-⌘= on most keyboards, so it gets its own hidden twin of Zoom In.
+    private static func plusZoomItem(in commands: CommandList) -> NSMenuItem? {
+        guard let zoomIn = commands.command(.zoomIn) else { return nil }
+        let item = menuItem(for: zoomIn)
+        item.keyEquivalent = "+"
+        item.isHidden = true
+        item.allowsKeyEquivalentWhenHidden = true
+        return item
     }
 
     private static func menuItem(for command: Command) -> NSMenuItem {

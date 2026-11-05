@@ -58,7 +58,7 @@ import Testing
     }
     @Test func fileMenuHoldsTabAndWindowCommands() {
         let file = MainMenu.build(commands: list).item(withTitle: "File")?.submenu
-        #expect(file?.items.map(\.title) == ["New Tab", "New Window", "Reopen Closed Tab", "Close Tab", "Close Window"])
+        #expect(file?.items.map(\.title) == ["New Tab", "New Window", "Reopen Closed Tab", "Close Tab", "Close Window", "Print…"])
     }
     /// A shortcut that isn't reserved can only fire from the menu bar, once the page has passed on it.
     @Test func everyPageFirstShortcutIsInTheMenu() {

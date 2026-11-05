@@ -8,6 +8,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
     let switcher = SwitcherView()
     let backdrop = BackdropView()
     let pill = DomainPill()
+    let findBar = FindBar()
     let loadingLine = LoadingLine()
     private(set) var usesFallbackBlur = false
     private(set) var railState = RailState()
@@ -57,6 +58,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         connectRail()
         connectTabs()
         connectSwitcher()
+        connectFindBar()
         setWindowButtonsVisible(false)
         appearance.addObserver { [weak self] in self?.applyAppearance() }
         tabs.profile.bookmarks.addObserver { [weak self] in self?.updateRailContents() }
@@ -127,7 +129,16 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         case .selectTab8: tabs.activate(index: 7)
         case .selectTab9: tabs.activate(index: 8)
         case .openSwitcher, .openSwitcherFromPage:
+            hideFindBar()
             openSwitcher()
+        case .find:
+            guard tab != nil else { return }
+            findBar.isHidden = false
+            findBar.focus()
+        case .print: tab?.printPage()
+        case .zoomIn: tab?.zoomIn()
+        case .zoomOut: tab?.zoomOut()
+        case .actualSize: tab?.actualSize()
         case .newWindow: onNewWindow?()
         case .toggleRail:
             railState.toggleShortcut()
@@ -255,6 +266,16 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         edgeStrip.autoresizingMask = [.height]
         contentView.addSubview(edgeStrip)
 
+        findBar.translatesAutoresizingMaskIntoConstraints = false
+        findBar.isHidden = true
+        contentView.addSubview(findBar)
+        NSLayoutConstraint.activate([
+            findBar.topAnchor.constraint(equalTo: contentView.topAnchor, constant: TopDragStrip.height + 10),
+            findBar.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -16),
+            findBar.widthAnchor.constraint(equalToConstant: FindBar.width),
+            findBar.heightAnchor.constraint(equalToConstant: FindBar.height),
+        ])
+
         switcher.frame = contentView.bounds
         switcher.autoresizingMask = [.width, .height]
         switcher.isHidden = true
@@ -341,6 +362,25 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         switcher.onQueryChange = { [weak self] in self?.searchInSwitcher($0) }
     }
 
+    private func connectFindBar() {
+        findBar.onSearch = { [weak self] text, backwards in
+            guard let tab = self?.tab else { return }
+            Task { [weak self] in
+                let found = await tab.find(text, backwards: backwards)
+                if tab === self?.tab { self?.findBar.showResult(found: found) }
+            }
+        }
+        findBar.onClose = { [weak self] in
+            self?.hideFindBar()
+            self?.window?.makeFirstResponder(self?.tab?.webView)
+        }
+    }
+
+    private func hideFindBar() {
+        findBar.isHidden = true
+        findBar.showResult(found: true)
+    }
+
     private func openSwitcher() {
         guard switcher.isHidden else {
             switcher.focus()
@@ -421,6 +461,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
     private func showActiveTab() {
         openPopover?.close()
         openPopover = nil
+        hideFindBar()
         shownPage?.alphaValue = 0
         shownPage = tab?.pageView
         if let tab {
