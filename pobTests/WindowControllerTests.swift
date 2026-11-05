@@ -347,6 +347,16 @@ import WebKit
         #expect(controller.tabs.isEmpty)
         #expect(!controller.switcher.isHidden)
     }
+    @Test func aPageClosingTheLastTabBehindAnOpenSwitcherLeavesItUp() async throws {
+        let (controller, _) = make()
+        let window = try #require(controller.window)
+        let tab = try #require(controller.tab)
+        controller.perform(.openSwitcher)
+        await expectClose(of: window, count: 0) { tab.webViewDidClose(tab.webView) }
+        #expect(controller.tabs.isEmpty)
+        #expect(!controller.switcher.isHidden)
+        #expect(window.firstResponder === controller.switcher.field.currentEditor())
+    }
     @Test func reopeningBringsTheLastTabBackAndClosesTheSwitcher() async throws {
         let (controller, _) = make()
         let tab = try #require(controller.tab)

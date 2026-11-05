@@ -108,6 +108,37 @@ import Testing
         #expect(rows.contains { $0 === hovered })
         #expect(rows.allSatisfy { closeButton(of: $0)?.alphaValue == 0 })
     }
+    /// The rail is hidden most of the time, and whatever a tab did meanwhile has to be there when it opens.
+    @Test func aTitleChangeWhileHiddenIsThereWhenTheListComesBack() throws {
+        var records = [TabRecord(title: "One"), TabRecord(title: "Two")]
+        let view = listShowing(records, active: records[0].id)
+        let window = NSWindow(contentRect: view.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        window.contentView = view
+        window.displayIfNeeded()
+        view.isHidden = true
+        window.displayIfNeeded()
+
+        records[1].title = "(1) Two"
+        view.update(records: records, activeID: records[0].id)
+        view.isHidden = false
+        window.displayIfNeeded()
+        #expect(title(of: try #require(table(in: view).view(atColumn: 0, row: 1, makeIfNecessary: false))) == "(1) Two")
+    }
+    @Test func aTitleChangeOutOfViewIsThereWhenTheRowScrollsIn() throws {
+        var records = (0..<40).map { TabRecord(title: "Tab \($0)") }
+        let view = listShowing(records, active: records[0].id)
+        let window = NSWindow(contentRect: view.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        window.contentView = view
+        window.displayIfNeeded()
+        let table = try table(in: view)
+        #expect(table.view(atColumn: 0, row: 39, makeIfNecessary: false) == nil)
+
+        records[39].title = "(1) Tab 39"
+        view.update(records: records, activeID: records[0].id)
+        table.scrollRowToVisible(39)
+        window.displayIfNeeded()
+        #expect(title(of: try #require(table.view(atColumn: 0, row: 39, makeIfNecessary: false))) == "(1) Tab 39")
+    }
     @Test func theListScrollsOnlyWhenTheActiveTabChanges() throws {
         var records = (0..<40).map { TabRecord(title: "Tab \($0)") }
         let view = listShowing(records, active: records[0].id)
