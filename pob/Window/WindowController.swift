@@ -150,6 +150,11 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
             guard let tab, let host = tab.webView.url?.host() else { return }
             Permissions.forget(host: host, in: tab.profile.siteSettings)
             tab.webView.reload()
+        case .toggleSiteBlocking:
+            guard let tab, let host = tab.webView.url?.host() else { return }
+            let settings = tab.profile.siteSettings
+            settings[host].adBlockerOff = settings[host].adBlockerOff == true ? nil : true // on is the default, so it leaves no entry
+            tab.webView.reload()
         case .toggleRail:
             railState.toggleShortcut()
             if railState.visibility == .hidden {

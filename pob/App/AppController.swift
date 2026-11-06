@@ -53,6 +53,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             self?.controller(of: NSApp.keyWindow)?.showNotice(name)
         }
         Task { await Profile.initial.history.prune(before: Date().addingTimeInterval(-365 * 86_400)) }
+        prepareFilterLists()
 
         let appearance = AppearanceModel(
             store: SettingsStore(fileURL: SettingsStore.defaultFileURL),
@@ -223,7 +224,10 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// Both handlers run on the main thread: the timer on the run loop it was scheduled from, the source on `.main`.
     private func watchTabPhases() {
         phaseTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.updateTabPhases(now: .now, memoryPressure: false) }
+            MainActor.assumeIsolated {
+                self?.updateTabPhases(now: .now, memoryPressure: false)
+                self?.refreshFilterLists(now: .now)
+            }
         }
         let source = DispatchSource.makeMemoryPressureSource(eventMask: [.warning, .critical], queue: .main)
         source.setEventHandler { [weak self] in
@@ -231,6 +235,21 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
         source.activate()
         memoryPressureSource = source
+    }
+
+    /// Nothing waits for this. Pages load without rules until it lands.
+    func prepareFilterLists() {
+        guard let blocker = profile?.contentBlocker else { return }
+        Task(priority: .utility) {
+            await blocker.prepare()
+            await blocker.refreshIfStale(now: .now)
+        }
+    }
+
+    /// pob can stay open for weeks, so launch alone isn't enough.
+    func refreshFilterLists(now: Date) {
+        guard let blocker = profile?.contentBlocker else { return }
+        Task(priority: .utility) { await blocker.refreshIfStale(now: now) }
     }
 
     func updateTabPhases(now: Date, memoryPressure: Bool) {

@@ -70,6 +70,7 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
         webView.navigationDelegate = self
         webView.uiDelegate = self
         observeState()
+        profile.contentBlocker.attach(webView.configuration.userContentController)
     }
 
     private static func standardConfiguration(for profile: Profile) -> WKWebViewConfiguration {
@@ -185,8 +186,21 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
         } else if navigationAction.shouldPerformDownload {
             decisionHandler(.download)
         } else {
-            if navigationAction.targetFrame?.isMainFrame == true { mainFrameURL = navigationAction.request.url }
+            if navigationAction.targetFrame?.isMainFrame == true {
+                mainFrameURL = navigationAction.request.url
+                applyBlocking(for: navigationAction.request.url)
+            }
             decisionHandler(.allow)
+        }
+    }
+
+    /// Before the load goes ahead, so the page's first request already follows it. A restored page comes through here too.
+    private func applyBlocking(for url: URL?) {
+        let controller = webView.configuration.userContentController
+        if let host = url?.host(), profile.siteSettings[host].adBlockerOff == true {
+            profile.contentBlocker.detach(controller)
+        } else {
+            profile.contentBlocker.attach(controller)
         }
     }
 
@@ -198,7 +212,10 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
         // Like Safari, an attachment downloads even when WebKit could show it.
         let disposition = (navigationResponse.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition")
         let isAttachment = disposition?.trimmingCharacters(in: .whitespaces).lowercased().hasPrefix("attachment") == true
-        decisionHandler(isAttachment || !navigationResponse.canShowMIMEType ? .download : .allow)
+        let isDownload = isAttachment || !navigationResponse.canShowMIMEType
+        // Only now does it show it's no page, so the one that stays goes back to its own site's rules.
+        if isDownload, navigationResponse.isForMainFrame { applyBlocking(for: webView.backForwardList.currentItem?.url) }
+        decisionHandler(isDownload ? .download : .allow)
     }
 
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {

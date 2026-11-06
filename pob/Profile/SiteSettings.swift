@@ -7,6 +7,7 @@ struct SiteSetting: Codable, Equatable {
     var microphone: Bool?
     var location: Bool?
     var allowsInvalidCertificate: Bool?
+    var adBlockerOff: Bool?
 }
 
 final class SiteSettings {

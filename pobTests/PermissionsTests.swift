@@ -46,6 +46,13 @@ import WebKit
         #expect(store["a.com"].allowsInvalidCertificate == nil)
         #expect(store["a.com"].zoom == 1.25)
     }
+    @Test func resettingASiteKeepsItsAdBlockerSwitch() {
+        let store = settings()
+        store["a.com"].adBlockerOff = true
+        Permissions.remember(true, kinds: [.camera], host: "a.com", in: store)
+        Permissions.forget(host: "a.com", in: store)
+        #expect(store["a.com"].adBlockerOff == true)
+    }
     @Test func screenRecordingHasARouteToSettings() {
         #expect(Permissions.screenRecordingSettingsURL.absoluteString.hasSuffix("Privacy_ScreenCapture"))
         #expect(CommandList.standard { _ in }.command(.screenRecordingSettings)?.title == "Screen Recording Settings")

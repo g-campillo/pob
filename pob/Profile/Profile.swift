@@ -22,6 +22,13 @@ final class Profile {
     /// Shared by every window. A temporary profile keeps its downloads in its own folder.
     lazy var downloads = Downloads(directory: downloadsDirectory)
 
+    /// Built with the first tab. A test sets its own, for small lists and no network.
+    lazy var contentBlocker = ContentBlocker(
+        cacheDirectory: directory.appending(path: "rules", directoryHint: .isDirectory),
+        bundledDirectory: Bundle.main.resourceURL ?? directory,
+        fetch: { try await ContentBlocker.download($0) }
+    )
+
     private let faviconDirectory: URL
     private let downloadsDirectory: URL
 

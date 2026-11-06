@@ -136,6 +136,7 @@ final class TabManager {
         }
         tab.onCreatePopup = { [weak self] configuration in
             guard let self else { return nil }
+            configuration.userContentController = WKUserContentController() // WebKit passes the opener's, and each tab switches its own rules
             let popup = Tab(profile: profile, configuration: configuration)
             add(popup, activate: true, opener: id)
             return popup.webView
