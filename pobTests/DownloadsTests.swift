@@ -11,6 +11,8 @@ final class LocalServer {
         /// Promises `length` bytes (none promised when nil), sends `sent`, then stays silent until `dropConnections()`.
         case stall(sent: Data, length: Int?)
         case redirect(to: String)
+        /// Closes the connection with no response.
+        case hangUp
     }
 
     var routes: [String: Reply] = [:]
@@ -90,6 +92,8 @@ final class LocalServer {
             if let length { head += "Content-Length: \(length)\r\n" }
             head += "\r\n"
             connection.send(content: Data(head.utf8) + sent, completion: .idempotent)
+        case .hangUp?:
+            close(connection)
         case nil:
             connection.send(content: Data("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8), completion: .contentProcessed { _ in
                 MainActor.assumeIsolated { self.close(connection) }
@@ -172,6 +176,11 @@ final class Asked {
     func emptyNamesGetADefault(name: String) throws {
         let folder = try directory()
         #expect(Downloads.safeDestination(directory: folder, suggestedFilename: name).lastPathComponent == "download")
+    }
+    @Test func lineSeparatorsAreStrippedSoANameCantAddALineToTheSheet() throws {
+        let folder = try directory()
+        let name = Downloads.safeDestination(directory: folder, suggestedFilename: "a.zip\u{2028}From apple.com\u{2029}x").lastPathComponent
+        #expect(name == "a.zipFrom apple.comx")
     }
     @Test func controlCharactersAreStripped() throws {
         let folder = try directory()
@@ -677,6 +686,24 @@ final class Asked {
         tab.webView.load(URLRequest(url: server.url("/att")))
         #expect(await within { asked.alerts.count == 3 })
         #expect(downloads.items.isEmpty)
+    }
+
+    @Test func aRowMadeWithoutAQuestionStillAsksOnRetry() async throws {
+        let server = try await server(["/hang.bin": .hangUp])
+        defer { server.stop() }
+        let tab = Tab(profile: .temporary())
+        let downloads = tab.profile.downloads
+        let asked = Asked()
+        asked.install(on: downloads)
+        tab.webView.startDownload(using: URLRequest(url: server.url("/hang.bin"))) { downloads.track($0) }
+        #expect(await within { downloads.items.first?.state == .failed }) // the row stays, and it was never asked about
+        #expect(asked.alerts.isEmpty)
+        server.routes["/hang.bin"] = .body(Data("whole".utf8), headers: Self.binary)
+
+        downloads.retry(try #require(downloads.items.first).id, in: tab.webView)
+
+        #expect(await within { downloads.items.contains { $0.state == .finished } })
+        #expect(asked.alerts.count == 1)
     }
 
     @Test func aScriptStartedDownloadWithNoClickAsks() async throws {

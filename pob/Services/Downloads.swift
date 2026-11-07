@@ -51,7 +51,8 @@ final class Downloads: NSObject, WKDownloadDelegate {
 
     private let directory: URL
     private var running: [ObjectIdentifier: Running] = [:]
-    private var requests: [UUID: URLRequest] = [:]
+    /// What Retry replays. `confirmed` is whether the user was ever asked, so a row made without a question asks on Retry.
+    private var requests: [UUID: (request: URLRequest, confirmed: Bool)] = [:]
     /// The file doesn't exist until its download writes it, so names handed out are remembered.
     private var claimed: Set<URL> = []
     private var lastNotify = ContinuousClock.Instant.now - .seconds(10)
@@ -75,10 +76,10 @@ final class Downloads: NSObject, WKDownloadDelegate {
 
     func retry(_ id: UUID, in webView: WKWebView) {
         guard let index = items.firstIndex(where: { $0.id == id }), items[index].state == .failed,
-              let request = requests[id] else { return }
+              let saved = requests[id] else { return }
         items.remove(at: index)
         requests[id] = nil
-        webView.startDownload(using: request) { [weak self] in self?.track($0, confirmed: true) }
+        webView.startDownload(using: saved.request) { [weak self] in self?.track($0, confirmed: saved.confirmed) }
         notify()
     }
 
@@ -123,7 +124,7 @@ final class Downloads: NSObject, WKDownloadDelegate {
             // Failed before any response, so no destination was ever chosen. The row still needs to be there for Retry.
             let name = Self.safeDestination(directory: directory, suggestedFilename: entry.request?.url?.lastPathComponent ?? "").lastPathComponent
             items.append(DownloadItem(id: entry.id, filename: name, destination: directory.appending(path: name), state: .failed, progress: 0))
-            requests[entry.id] = entry.request
+            requests[entry.id] = entry.request.map { ($0, entry.confirmed) }
             notify()
             onStart?(name)
             return
@@ -211,7 +212,7 @@ final class Downloads: NSObject, WKDownloadDelegate {
         }
         let url = destination(for: suggestedFilename)
         items.append(DownloadItem(id: entry.id, filename: url.lastPathComponent, destination: url, state: .running, progress: 0))
-        requests[entry.id] = entry.request
+        requests[entry.id] = entry.request.map { ($0, true) }
         notify()
         onStart?(url.lastPathComponent)
         completionHandler(url)
@@ -227,12 +228,12 @@ final class Downloads: NSObject, WKDownloadDelegate {
 
     // MARK: Names
 
-    /// The name comes from the server, so it can't leave the folder, hold control or invisible formatting characters
+    /// The name comes from the server, so it can't leave the folder, hold control, line breaking or invisible formatting characters
     /// (a right-to-left override disguises an extension) or be too long for the file system.
     static func safeDestination(directory: URL, suggestedFilename: String, taken: Set<URL> = []) -> URL {
         // Split on scalars: a "/" followed by a combining mark is a single Character that a Character split would keep.
         let kept = suggestedFilename.unicodeScalars.filter {
-            $0.properties.generalCategory != .control && !$0.properties.isDefaultIgnorableCodePoint
+            ![.control, .lineSeparator, .paragraphSeparator].contains($0.properties.generalCategory) && !$0.properties.isDefaultIgnorableCodePoint
         }
         var name = kept.split { $0 == "/" || $0 == "\\" }.last.map { String(String.UnicodeScalarView($0)) } ?? ""
         if name.isEmpty || name == "." || name == ".." { name = "download" }

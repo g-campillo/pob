@@ -107,6 +107,17 @@ import WebKit
         #expect(app.windows.count == 1)
         #expect(urls(of: app.windows[0]) == [first])
     }
+    /// A sheet is the key window while its answer runs, and the notice belongs to the window under it.
+    @Test func theNoticeGoesToTheWindowUnderTheKeySheet() {
+        final class Sheet: NSWindow { var owner: NSWindow?; override var sheetParent: NSWindow? { owner } }
+        let app = makeApp()
+        app.restoreSession()
+        let sheet = Sheet()
+        sheet.owner = app.windows[0].window
+        #expect(app.noticeController(keyWindow: sheet) === app.windows[0])
+        #expect(app.noticeController(keyWindow: app.windows[0].window) === app.windows[0])
+        #expect(app.noticeController(keyWindow: NSWindow()) == nil)
+    }
     @Test func theSwitcherClosesFirst() {
         let app = makeApp()
         app.restoreSession()

@@ -28,6 +28,11 @@ final class AppController: NSObject, NSApplicationDelegate {
         controller(of: NSApp.keyWindow) != nil
     }
 
+    /// The window that shows the pill notice. A download's answer runs while its sheet is still the key window.
+    func noticeController(keyWindow: NSWindow?) -> WindowController? {
+        controller(of: keyWindow?.sheetParent ?? keyWindow)
+    }
+
     private var isShowingAWindow: Bool {
         windows.contains { $0.window?.isVisible == true }
     }
@@ -50,7 +55,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         profile = .initial
         // Every window shares the profile's downloads, so only the key window shows the notice.
         Profile.initial.downloads.onStart = { [weak self] name in
-            self?.controller(of: NSApp.keyWindow)?.showNotice(name)
+            self?.noticeController(keyWindow: NSApp.keyWindow)?.showNotice(name)
         }
         // A background tab or a closed popup has no window of its own to ask in.
         Profile.initial.downloads.frontWindow = { [weak self] in
