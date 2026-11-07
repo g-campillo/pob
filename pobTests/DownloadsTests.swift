@@ -98,6 +98,35 @@ final class LocalServer {
     }
 }
 
+/// Never on screen: tests that need a real sheet put it on a window far outside every display.
+@MainActor func offscreenWindow() -> NSWindow {
+    let window = NSWindow(contentRect: NSRect(x: -20000, y: -20000, width: 300, height: 200), styleMask: [.borderless], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.orderFrontRegardless()
+    return window
+}
+
+private let stubWindow = NSWindow()
+
+/// The old tests aren't about the question, so they answer Download.
+func allowDownloads(_ downloads: Downloads) {
+    downloads.frontWindow = { stubWindow }
+    downloads.alertSeam = { _ in .alertFirstButtonReturn }
+}
+
+/// What the question showed, and what it was answered.
+final class Asked {
+    var alerts: [NSAlert] = []
+    var answer: NSApplication.ModalResponse = .alertFirstButtonReturn
+    func install(on downloads: Downloads) {
+        downloads.frontWindow = { stubWindow }
+        downloads.alertSeam = { [self] alert in
+            alerts.append(alert)
+            return answer
+        }
+    }
+}
+
 @Suite(.timeLimit(.minutes(1))) struct DownloadsTests {
     func directory() throws -> URL {
         let url = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
@@ -202,6 +231,7 @@ final class LocalServer {
         defer { server.stop() }
         let tab = Tab(profile: .temporary())
         let downloads = tab.profile.downloads
+        allowDownloads(downloads)
         var started: [String] = []
         downloads.onStart = { started.append($0) }
 
@@ -223,6 +253,7 @@ final class LocalServer {
         defer { server.stop() }
         let tab = Tab(profile: .temporary())
         let downloads = tab.profile.downloads
+        allowDownloads(downloads)
 
         tab.webView.load(URLRequest(url: server.url("/note")))
 
@@ -250,6 +281,7 @@ final class LocalServer {
         defer { server.stop() }
         let tab = Tab(profile: .temporary())
         let downloads = tab.profile.downloads
+        allowDownloads(downloads)
         await finishLoading(tab) { tab.webView.load(URLRequest(url: server.url("/"))) }
 
         _ = try await tab.webView.evaluateJavaScript("document.getElementById('l').click()")
@@ -265,6 +297,7 @@ final class LocalServer {
         defer { server.stop() }
         let tab = Tab(profile: .temporary())
         let downloads = tab.profile.downloads
+        allowDownloads(downloads)
         tab.webView.startDownload(using: URLRequest(url: server.url("/f.bin"))) { downloads.track($0) }
         #expect(await within { downloads.items.first?.state == .running })
 
@@ -285,6 +318,7 @@ final class LocalServer {
         defer { server.stop() }
         let tab = Tab(profile: .temporary())
         let downloads = tab.profile.downloads
+        allowDownloads(downloads)
         tab.webView.startDownload(using: URLRequest(url: server.url("/slow.bin"))) { downloads.track($0) }
         #expect(await within { downloads.items.first?.state == .running })
         let id = try #require(downloads.items.first?.id)
@@ -306,6 +340,7 @@ final class LocalServer {
         dead.stop()
         let tab = Tab(profile: .temporary())
         let downloads = tab.profile.downloads
+        allowDownloads(downloads)
         var notices: [String] = []
         downloads.onStart = { notices.append($0) }
         tab.webView.startDownload(using: URLRequest(url: url)) { downloads.track($0) }
@@ -327,6 +362,7 @@ final class LocalServer {
         defer { server.stop() }
         let tab = Tab(profile: .temporary())
         let downloads = tab.profile.downloads
+        allowDownloads(downloads)
         tab.webView.startDownload(using: URLRequest(url: server.url("/f.bin"))) { downloads.track($0) }
         #expect(await within { downloads.items.first?.state == .running })
         let partial = try #require(downloads.items.first).destination
@@ -348,6 +384,7 @@ final class LocalServer {
         defer { server.stop() }
         let tab = Tab(profile: .temporary())
         let downloads = tab.profile.downloads
+        allowDownloads(downloads)
         tab.webView.startDownload(using: URLRequest(url: server.url("/half.bin"))) { downloads.track($0) }
         #expect(await within { abs((downloads.items.first?.progress ?? 0) - 0.5) < 0.01 })
     }
@@ -357,6 +394,7 @@ final class LocalServer {
         defer { server.stop() }
         let tabs = TabManager(profile: .temporary(), keepsSpare: false)
         let opener = tabs.newTab(nil, activate: true)
+        allowDownloads(opener.profile.downloads)
         let popup = try #require(opener.onCreatePopup?(opener.webView.configuration))
         #expect(tabs.activeTab?.webView === popup)
 
@@ -365,6 +403,298 @@ final class LocalServer {
         #expect(await within { opener.profile.downloads.items.first?.state == .finished })
         #expect(await within { tabs.activeTab === opener })
         #expect(tabs.list.records.count == 1)
+    }
+
+    // MARK: Asking first
+
+    static let binary = ["Content-Type": "application/octet-stream"]
+
+    @Test func theSheetNamesTheCleanedFileAndTheHost() async throws {
+        let long = String(repeating: "a", count: 150)
+        let server = try await server([
+            "/hostile": .body(Data("x".utf8), headers: ["Content-Disposition": "attachment; filename*=UTF-8''report%E2%80%AEfdp.app"]),
+            "/\(long).pdf": .body(Data("x".utf8), headers: Self.binary),
+        ])
+        defer { server.stop() }
+        let tab = Tab(profile: .temporary())
+        let asked = Asked()
+        asked.install(on: tab.profile.downloads)
+
+        tab.webView.load(URLRequest(url: server.url("/hostile")))
+        #expect(await within { asked.alerts.count == 1 })
+        let hostile = try #require(asked.alerts.first)
+        #expect(hostile.messageText == "Download \"reportfdp.app\"?")
+        #expect(hostile.informativeText == "From 127.0.0.1")
+        #expect(hostile.buttons.map(\.title) == ["Download", "Cancel"])
+        #expect(hostile.buttons.first?.keyEquivalent == "\r")
+
+        tab.webView.startDownload(using: URLRequest(url: server.url("/\(long).pdf"))) { tab.profile.downloads.track($0) }
+        #expect(await within { asked.alerts.count == 2 })
+        let name = try #require(asked.alerts.last?.messageText.split(separator: "\"").dropFirst().first)
+        #expect(name.count <= 81 && name.hasSuffix(".pdf") && name.contains("…"))
+    }
+
+    @Test func answeringDownloadContinuesWithARowANoticeAndTheBytes() async throws {
+        let server = try await server(["/file.bin": .body(Data("real bytes".utf8), headers: Self.binary)])
+        defer { server.stop() }
+        let tab = Tab(profile: .temporary())
+        let downloads = tab.profile.downloads
+        let asked = Asked()
+        asked.install(on: downloads)
+        var notices: [String] = []
+        downloads.onStart = { notices.append($0) }
+
+        tab.webView.startDownload(using: URLRequest(url: server.url("/file.bin"))) { downloads.track($0) }
+
+        #expect(await within { downloads.items.first?.state == .finished })
+        #expect(asked.alerts.count == 1)
+        #expect(notices == ["file.bin"])
+        #expect(try String(contentsOf: try #require(downloads.items.first).destination, encoding: .utf8) == "real bytes")
+    }
+
+    @Test func cancelLeavesNoFileRowNoticeOrClaimedName() async throws {
+        let server = try await server(["/file.bin": .body(Data("x".utf8), headers: Self.binary)])
+        defer { server.stop() }
+        let tab = Tab(profile: .temporary())
+        let downloads = tab.profile.downloads
+        let asked = Asked()
+        asked.answer = .alertSecondButtonReturn
+        asked.install(on: downloads)
+        var notices: [String] = []
+        downloads.onStart = { notices.append($0) }
+
+        tab.webView.startDownload(using: URLRequest(url: server.url("/file.bin"))) { downloads.track($0) }
+        #expect(await within { asked.alerts.count == 1 })
+        try await Task.sleep(for: .milliseconds(400)) // the failure WebKit reports afterward must add nothing
+
+        #expect(downloads.items.isEmpty)
+        #expect(notices.isEmpty)
+        #expect(downloads.destination(for: "file.bin").lastPathComponent == "file.bin")
+        #expect(!FileManager.default.fileExists(atPath: tab.profile.directory.appending(path: "Downloads/file.bin").path))
+    }
+
+    @Test func noWindowAtAllShowsNothingAndAddsNoRow() async throws {
+        let server = try await server(["/file.bin": .body(Data("x".utf8), headers: Self.binary)])
+        defer { server.stop() }
+        let tab = Tab(profile: .temporary())
+        let downloads = tab.profile.downloads
+        var shown = 0
+        downloads.alertSeam = { _ in shown += 1; return .alertFirstButtonReturn }
+        downloads.frontWindow = { nil }
+        var notices: [String] = []
+        downloads.onStart = { notices.append($0) }
+
+        tab.webView.startDownload(using: URLRequest(url: server.url("/file.bin"))) { downloads.track($0) }
+        try await Task.sleep(for: .milliseconds(800))
+
+        #expect(shown == 0)
+        #expect(downloads.items.isEmpty)
+        #expect(notices.isEmpty)
+    }
+
+    @Test func aBackgroundTabsDownloadAsksOnTheFrontWindow() async throws {
+        let server = try await server(["/file.bin": .body(Data("x".utf8), headers: Self.binary)])
+        defer { server.stop() }
+        let tab = Tab(profile: .temporary())
+        #expect(tab.webView.window == nil)
+        let downloads = tab.profile.downloads
+        let asked = Asked()
+        asked.install(on: downloads)
+        var consulted = 0
+        let front = downloads.frontWindow
+        downloads.frontWindow = { consulted += 1; return front?() }
+
+        tab.webView.startDownload(using: URLRequest(url: server.url("/file.bin"))) { downloads.track($0) }
+
+        #expect(await within { downloads.items.first?.state == .finished })
+        #expect(consulted == 1)
+        #expect(asked.alerts.count == 1)
+    }
+
+    @Test func retryDoesntAskAgain() async throws {
+        let server = try await server(["/f.bin": .stall(sent: Data("part".utf8), length: 1_000_000)])
+        defer { server.stop() }
+        let tab = Tab(profile: .temporary())
+        let downloads = tab.profile.downloads
+        let asked = Asked()
+        asked.install(on: downloads)
+        tab.webView.startDownload(using: URLRequest(url: server.url("/f.bin"))) { downloads.track($0) }
+        #expect(await within { downloads.items.first?.state == .running })
+        server.dropConnections()
+        #expect(await within { downloads.items.first?.state == .failed })
+        server.routes["/f.bin"] = .body(Data("whole".utf8), headers: Self.binary)
+
+        downloads.retry(try #require(downloads.items.first).id, in: tab.webView)
+
+        #expect(await within { downloads.items.contains { $0.state == .finished } })
+        #expect(asked.alerts.count == 1)
+    }
+
+    @Test func aSecondDownloadFromThePageWhileItsSheetIsUpIsDroppedAndTheFirstStillWorks() async throws {
+        let server = try await server(["/a.bin": .body(Data("a".utf8), headers: Self.binary), "/b.bin": .body(Data("b".utf8), headers: Self.binary)])
+        defer { server.stop() }
+        let window = offscreenWindow()
+        defer { window.close() }
+        let tab = Tab(profile: .temporary())
+        let downloads = tab.profile.downloads
+        downloads.frontWindow = { window }
+        tab.webView.startDownload(using: URLRequest(url: server.url("/a.bin"))) { downloads.track($0) }
+        #expect(await within { window.attachedSheet != nil })
+
+        tab.webView.startDownload(using: URLRequest(url: server.url("/b.bin"))) { downloads.track($0) }
+        try await Task.sleep(for: .milliseconds(800))
+        #expect(window.sheets.count == 1) // nothing stacked behind the first
+        #expect(downloads.items.isEmpty)
+
+        window.endSheet(try #require(window.attachedSheet), returnCode: .alertFirstButtonReturn)
+        #expect(await within { downloads.items.first?.state == .finished })
+        #expect(downloads.items.map(\.filename) == ["a.bin"])
+    }
+
+    @Test func afterCancelThePagesDownloadsAreDroppedFor3SecondsAndOtherPagesAreNotAffected() async throws {
+        let server = try await server(["/file.bin": .body(Data("x".utf8), headers: Self.binary)])
+        defer { server.stop() }
+        let profile = Profile.temporary()
+        let tab = Tab(profile: profile), other = Tab(profile: profile)
+        let downloads = profile.downloads
+        let asked = Asked()
+        asked.answer = .alertSecondButtonReturn
+        asked.install(on: downloads)
+        var clock = Date(timeIntervalSince1970: 1_000)
+        downloads.now = { clock }
+        func request(_ tab: Tab) { tab.webView.startDownload(using: URLRequest(url: server.url("/file.bin"))) { downloads.track($0) } }
+
+        request(tab)
+        #expect(await within { asked.alerts.count == 1 })
+
+        clock += 2.9
+        request(tab)
+        try await Task.sleep(for: .milliseconds(800))
+        #expect(asked.alerts.count == 1) // dropped without asking
+
+        request(other)
+        #expect(await within { asked.alerts.count == 2 }) // another page still asks
+
+        clock += 0.2
+        request(tab)
+        #expect(await within { asked.alerts.count == 3 }) // past the pause, it asks again
+        #expect(downloads.items.isEmpty)
+    }
+
+    @Test func aWindowWithNoAnswerGivenDoesntStartThePause() async throws {
+        let server = try await server(["/file.bin": .body(Data("x".utf8), headers: Self.binary)])
+        defer { server.stop() }
+        let tab = Tab(profile: .temporary())
+        let downloads = tab.profile.downloads
+        let asked = Asked()
+        asked.answer = .cancel // what a window that can't show it answers
+        asked.install(on: downloads)
+
+        tab.webView.startDownload(using: URLRequest(url: server.url("/file.bin"))) { downloads.track($0) }
+        #expect(await within { asked.alerts.count == 1 })
+        try await Task.sleep(for: .milliseconds(400))
+        tab.webView.startDownload(using: URLRequest(url: server.url("/file.bin"))) { downloads.track($0) }
+
+        #expect(await within { asked.alerts.count == 2 })
+    }
+
+    @Test func closingTheWindowUnderTheSheetAnswersCancelSoNothingHangs() async throws {
+        let server = try await server(["/file.bin": .body(Data("x".utf8), headers: Self.binary)])
+        defer { server.stop() }
+        let window = offscreenWindow()
+        let tab = Tab(profile: .temporary())
+        let downloads = tab.profile.downloads
+        downloads.frontWindow = { window }
+        tab.webView.startDownload(using: URLRequest(url: server.url("/file.bin"))) { downloads.track($0) }
+        #expect(await within { window.attachedSheet != nil })
+
+        window.close()
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(downloads.items.isEmpty)
+
+        // The page's pending question was settled, so its next download asks on a new window.
+        let next = offscreenWindow()
+        defer { next.close() }
+        downloads.frontWindow = { next }
+        tab.webView.startDownload(using: URLRequest(url: server.url("/file.bin"))) { downloads.track($0) }
+        #expect(await within { next.attachedSheet != nil })
+        next.endSheet(try #require(next.attachedSheet), returnCode: .alertSecondButtonReturn)
+    }
+
+    @Test func aWindowAlreadyShowingASheetQueuesTheSecondOneAndBothAnswerOnce() async throws {
+        let server = try await server(["/a.bin": .body(Data("a".utf8), headers: Self.binary), "/b.bin": .body(Data("b".utf8), headers: Self.binary)])
+        defer { server.stop() }
+        let window = offscreenWindow()
+        defer { window.close() }
+        let profile = Profile.temporary()
+        let first = Tab(profile: profile), second = Tab(profile: profile) // two pages, so neither drops the other
+        let downloads = profile.downloads
+        downloads.frontWindow = { window }
+        first.webView.startDownload(using: URLRequest(url: server.url("/a.bin"))) { downloads.track($0) }
+        #expect(await within { window.attachedSheet != nil })
+        second.webView.startDownload(using: URLRequest(url: server.url("/b.bin"))) { downloads.track($0) }
+        #expect(await within { window.sheets.count == 2 })
+
+        window.endSheet(try #require(window.attachedSheet), returnCode: .alertFirstButtonReturn)
+        #expect(await within { downloads.items.count == 1 && downloads.items[0].state == .finished })
+        #expect(await within { window.sheets.count == 1 && window.attachedSheet != nil })
+        window.endSheet(try #require(window.attachedSheet), returnCode: .alertFirstButtonReturn)
+        #expect(await within { downloads.items.count == 2 && downloads.items.allSatisfy { $0.state == .finished } })
+        #expect(Set(downloads.items.map(\.filename)) == ["a.bin", "b.bin"])
+    }
+
+    @Test func attachmentAndTargetBlankAttachmentAndDownloadLinkAllAsk() async throws {
+        let page = #"""
+        <a id="d" href="/data.bin" download="chosen.bin">d</a>
+        <a id="b" href="/att" target="_blank">b</a>
+        """#
+        let server = try await server([
+            "/": .body(Data(page.utf8), headers: ["Content-Type": "text/html"]),
+            "/data.bin": .body(Data("x".utf8), headers: Self.binary),
+            "/att": .body(Data("hello".utf8), headers: ["Content-Type": "text/plain", "Content-Disposition": "attachment; filename=\"att.txt\""]),
+        ])
+        defer { server.stop() }
+        let tabs = TabManager(profile: .temporary(), keepsSpare: false)
+        let tab = tabs.newTab(nil, activate: true)
+        let downloads = tab.profile.downloads
+        let asked = Asked()
+        asked.answer = .alertSecondButtonReturn
+        asked.install(on: downloads)
+        var clock = Date(timeIntervalSince1970: 1_000)
+        downloads.now = { clock }
+        await finishLoading(tab) { tab.webView.load(URLRequest(url: server.url("/"))) }
+
+        _ = try await tab.webView.evaluateJavaScript("document.getElementById('d').click()")
+        #expect(await within { asked.alerts.count == 1 })
+        #expect(asked.alerts.first?.messageText == "Download \"chosen.bin\"?")
+
+        clock += 4
+        _ = try await tab.webView.evaluateJavaScript("document.getElementById('b').click()")
+        #expect(await within { asked.alerts.count == 2 })
+        #expect(asked.alerts.last?.messageText == "Download \"att.txt\"?")
+
+        clock += 4
+        tab.webView.load(URLRequest(url: server.url("/att")))
+        #expect(await within { asked.alerts.count == 3 })
+        #expect(downloads.items.isEmpty)
+    }
+
+    @Test func aScriptStartedDownloadWithNoClickAsks() async throws {
+        let page = #"<body><script>var a=document.createElement('a');a.href='/data.bin';a.download='x.bin';document.body.appendChild(a);a.click();</script></body>"#
+        let server = try await server([
+            "/": .body(Data(page.utf8), headers: ["Content-Type": "text/html"]),
+            "/data.bin": .body(Data("x".utf8), headers: Self.binary),
+        ])
+        defer { server.stop() }
+        let tab = Tab(profile: .temporary())
+        let asked = Asked()
+        asked.answer = .alertSecondButtonReturn
+        asked.install(on: tab.profile.downloads)
+
+        tab.webView.load(URLRequest(url: server.url("/")))
+
+        #expect(await within { asked.alerts.count == 1 })
+        #expect(asked.alerts.first?.messageText == "Download \"x.bin\"?")
     }
 
     // MARK: Chrome
@@ -383,6 +713,7 @@ final class LocalServer {
         defer { server.stop() }
         let tab = Tab(profile: .temporary())
         let downloads = tab.profile.downloads
+        allowDownloads(downloads)
         tab.webView.startDownload(using: URLRequest(url: server.url("/a.bin"))) { downloads.track($0) }
         #expect(await within { downloads.items.first?.state == .finished })
 
@@ -414,6 +745,7 @@ final class LocalServer {
         defer { server.stop() }
         let tab = Tab(profile: .temporary())
         let downloads = tab.profile.downloads
+        allowDownloads(downloads)
         for _ in 0..<14 {
             tab.webView.startDownload(using: URLRequest(url: server.url("/a.bin"))) { downloads.track($0) }
         }
@@ -432,6 +764,7 @@ final class LocalServer {
         defer { server.stop() }
         let tab = Tab(profile: .temporary())
         let downloads = tab.profile.downloads
+        allowDownloads(downloads)
         tab.webView.startDownload(using: URLRequest(url: server.url("/u.bin"))) { downloads.track($0) }
         #expect(await within { downloads.items.first?.state == .running })
         let popover = DownloadsPopover(downloads: downloads) { _ in }

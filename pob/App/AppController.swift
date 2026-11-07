@@ -52,6 +52,11 @@ final class AppController: NSObject, NSApplicationDelegate {
         Profile.initial.downloads.onStart = { [weak self] name in
             self?.controller(of: NSApp.keyWindow)?.showNotice(name)
         }
+        // A background tab or a closed popup has no window of its own to ask in.
+        Profile.initial.downloads.frontWindow = { [weak self] in
+            guard let self else { return nil }
+            return (controller(of: NSApp.keyWindow) ?? NSApp.orderedWindows.lazy.compactMap(controller(of:)).first)?.window
+        }
         Task { await Profile.initial.history.prune(before: Date().addingTimeInterval(-365 * 86_400)) }
         prepareFilterLists()
 

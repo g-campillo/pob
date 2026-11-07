@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 import WebKit
 
 enum DownloadState: Equatable { case running, finished, failed }
@@ -17,14 +18,36 @@ final class Downloads: NSObject, WKDownloadDelegate {
     var onChange: (() -> Void)?
     /// Owned by `AppController`. Gets the filename when a download starts.
     var onStart: ((String) -> Void)?
+    /// Owned by `AppController`. Where the question goes when the page's own window is gone or it's in a background tab.
+    var frontWindow: (() -> NSWindow?)?
+    /// Tests answer the question through this, because a sheet needs a window on screen.
+    var alertSeam: ((NSAlert) -> NSApplication.ModalResponse)?
+    /// Replaceable so a test can move past the pause after a Cancel.
+    var now: () -> Date = { .now }
     private(set) var items: [DownloadItem] = []
 
     private struct Running {
         let id: UUID
         let download: WKDownload // the only strong reference WebKit's download has
         let request: URLRequest?
+        /// Retry is the user asking directly, so it isn't asked about again.
+        let confirmed: Bool
         let observation: NSKeyValueObservation
     }
+
+    /// A download waiting on its sheet. Only `settle` ends one, so its completion handler runs exactly once.
+    private struct Question {
+        let download: WKDownload
+        let webView: ObjectIdentifier?
+        let suggestedFilename: String
+        let completion: @MainActor (URL?) -> Void
+        let windowClosed: NSObjectProtocol
+    }
+
+    private var questions: [ObjectIdentifier: Question] = [:]
+    private var cancelledAt: [ObjectIdentifier: Date] = [:]
+    /// Like `Tab.offerToOpen`: after a Cancel, that page's downloads are dropped for this long.
+    private static let pause: TimeInterval = 3
 
     private let directory: URL
     private var running: [ObjectIdentifier: Running] = [:]
@@ -40,14 +63,14 @@ final class Downloads: NSObject, WKDownloadDelegate {
         self.directory = directory
     }
 
-    func track(_ download: WKDownload) {
+    func track(_ download: WKDownload, confirmed: Bool = false) {
         download.delegate = self
         let id = UUID()
         let observation = download.progress.observe(\.fractionCompleted) { [weak self] progress, _ in
             let fraction = progress.fractionCompleted.isFinite ? progress.fractionCompleted : 0
             Task { @MainActor in self?.updateProgress(id, fraction) } // KVO may arrive off the main thread
         }
-        running[ObjectIdentifier(download)] = Running(id: id, download: download, request: download.originalRequest, observation: observation)
+        running[ObjectIdentifier(download)] = Running(id: id, download: download, request: download.originalRequest, confirmed: confirmed, observation: observation)
     }
 
     func retry(_ id: UUID, in webView: WKWebView) {
@@ -55,7 +78,7 @@ final class Downloads: NSObject, WKDownloadDelegate {
               let request = requests[id] else { return }
         items.remove(at: index)
         requests[id] = nil
-        webView.startDownload(using: request) { [weak self] in self?.track($0) }
+        webView.startDownload(using: request) { [weak self] in self?.track($0, confirmed: true) }
         notify()
     }
 
@@ -95,6 +118,7 @@ final class Downloads: NSObject, WKDownloadDelegate {
 
     private func finish(_ download: WKDownload, as state: DownloadState) {
         guard let entry = running.removeValue(forKey: ObjectIdentifier(download)) else { return }
+        guard questions[ObjectIdentifier(download)] == nil else { return } // gone while its sheet was up, so `settle` cancels
         guard let index = items.firstIndex(where: { $0.id == entry.id }) else {
             // Failed before any response, so no destination was ever chosen. The row still needs to be there for Retry.
             let name = Self.safeDestination(directory: directory, suggestedFilename: entry.request?.url?.lastPathComponent ?? "").lastPathComponent
@@ -130,6 +154,53 @@ final class Downloads: NSObject, WKDownloadDelegate {
         suggestedFilename: String,
         completionHandler: @escaping @MainActor (URL?) -> Void
     ) {
+        let id = ObjectIdentifier(download)
+        guard let entry = running[id] else { return completionHandler(nil) }
+        if entry.confirmed { return begin(download, suggestedFilename: suggestedFilename, completionHandler) }
+
+        // One sheet per page, so a page can't stack them, and a Cancel quiets it for a moment.
+        let webView = download.webView.map(ObjectIdentifier.init)
+        let busy = webView.map { view in questions.values.contains { $0.webView == view } || now().timeIntervalSince(cancelledAt[view] ?? .distantPast) < Self.pause } ?? false
+        guard !busy, let window = download.webView?.window ?? frontWindow?() else {
+            running[id] = nil
+            return completionHandler(nil)
+        }
+
+        let name = Self.safeDestination(directory: directory, suggestedFilename: suggestedFilename).lastPathComponent
+        let alert = NSAlert()
+        // Server names are untrusted and can be huge. The end stays, because that's where the extension is.
+        alert.messageText = "Download \"\(name.count > 80 ? name.prefix(40) + "…" + name.suffix(39) : name)\"?"
+        // A blob: or data: address has no host, so the page that made it is the one to name.
+        alert.informativeText = (download.originalRequest?.url?.host() ?? download.webView?.url?.host()).map { "From \($0)" } ?? ""
+        alert.addButton(withTitle: "Download")
+        alert.addButton(withTitle: "Cancel")
+        // AppKit never answers a sheet whose window closes under it.
+        let windowClosed = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.settle(id, .cancel) }
+        }
+        questions[id] = Question(download: download, webView: webView, suggestedFilename: suggestedFilename, completion: completionHandler, windowClosed: windowClosed)
+        if let alertSeam {
+            settle(id, alertSeam(alert))
+        } else {
+            alert.beginSheetModal(for: window) { [weak self] response in
+                MainActor.assumeIsolated { self?.settle(id, response) }
+            }
+        }
+    }
+
+    /// Anything but Download cancels, and only a real Cancel starts the pause: a window that closed answers nobody's question.
+    private func settle(_ id: ObjectIdentifier, _ response: NSApplication.ModalResponse) {
+        guard let question = questions.removeValue(forKey: id) else { return }
+        NotificationCenter.default.removeObserver(question.windowClosed)
+        if response == .alertSecondButtonReturn, let webView = question.webView { cancelledAt[webView] = now() }
+        guard response == .alertFirstButtonReturn, running[id] != nil else {
+            running[id] = nil // before WebKit reports the failure, so `finish` adds no row
+            return question.completion(nil)
+        }
+        begin(question.download, suggestedFilename: question.suggestedFilename, question.completion)
+    }
+
+    private func begin(_ download: WKDownload, suggestedFilename: String, _ completionHandler: @MainActor (URL?) -> Void) {
         guard let entry = running[ObjectIdentifier(download)] else { return completionHandler(nil) }
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
