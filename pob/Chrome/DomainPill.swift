@@ -108,11 +108,14 @@ final class DomainPill: NSView {
         }
     }
 
+    /// Replaceable because the fade's completion never fires while the display is asleep, so tests take the instant path.
+    var reducesMotion: () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+
     private func hide(animated: Bool) {
         hideTask?.cancel()
         fadeGeneration += 1
         let generation = fadeGeneration
-        guard animated, !isHidden, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+        guard animated, !isHidden, !reducesMotion() else {
             isHidden = true
             isHovered = false // a hidden view gets no mouseExited
             return

@@ -75,6 +75,7 @@ import Testing
     }
     @Test func copiedFadesAfterItsTimeEvenWithThePointerInside() async {
         let pill = DomainPill(frame: .zero)
+        pill.reducesMotion = { true } // the fade's completion needs an awake display
         pill.pasteboard = NSPasteboard(name: NSPasteboard.Name(UUID().uuidString))
         pill.copiedFor = .milliseconds(50)
         pill.show(url: URL(string: "https://example.com"))
@@ -85,6 +86,7 @@ import Testing
     }
     @Test func hoverDoesNotStickAfterThePillIsHiddenUnderThePointer() async {
         let pill = DomainPill(frame: .zero)
+        pill.reducesMotion = { true }
         pill.visibleFor = .milliseconds(50)
         pill.show(url: URL(string: "https://example.com"))
         pill.mouseEntered(with: event(.mouseEntered))
