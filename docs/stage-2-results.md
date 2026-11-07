@@ -10,7 +10,7 @@ Run by the user on 2026-11-06 on macOS 27.0.1, with an Apple M5 Pro, on branch `
 | Domain pill | Pass | Same report |
 | Sign-in | Pass | Same report |
 | Session | Pass | Same report. Closing the last window empties the session by design, and ⌘Q restores it |
-| Downloads | Pass | Same report |
+| Downloads | Pass | Same report. The prompt before each download came after this check, so it hasn't been tried by hand |
 | Find, print, zoom | Pass | Same report |
 | Permissions | Pass | Same report |
 | Ad blocking | Pass | No ads appeared on speedtest.net, which normally has many |
@@ -24,7 +24,7 @@ Stage 2 is done when the last two rows pass.
 
 ## Automated checks
 
-- 569 tests in 37 suites pass, with no Swift warnings.
+- 585 tests in 37 suites pass, with no Swift warnings, also with the screen locked.
 - The Liquid Glass audit found no glass on content, no glass on glass and no clear glass.
 - Real binary runs on a scratch home passed: a fresh launch, a restored HTTPS tab, garbage and hostile `session.json` files, force quits, and rules compiling on first launch and being reused on relaunch.
 - EasyList converts 78,146 lines to 59,774 rules, and EasyPrivacy 56,458 lines to 56,480 rules. Both are well under WebKit's limit of 150,000.
@@ -43,11 +43,8 @@ Stage 2 is done when the last two rows pass.
 - **Switcher:** Return on a typed word searches. ↓ then Return runs a matching command. This reverses the plan's row order.
 - **App links:** `msteams:`, `zoommtg:`, `mailto:` and similar links ask before opening the app. This goes beyond the spec's Stage 2 list, for the work day goal.
 - **Site permissions:** answers are remembered for the page's own host, not an embedded frame's.
-
-## Open for the user
-
-- Hidden frames and page scripts can start a download with no click. Files are quarantined, and the spec doesn't cover it. Safari asks first, and pob could too.
-- A link to a host on a filter list shows the error page, and Retry is blocked again. Only Toggle Ad Blocking for This Site gets through. A "Load anyway" button would finish this in Stage 3.
+- **Downloads:** the user chose to be asked before every download, because hidden frames and page scripts could start one with no click.
+- **Blocked pages:** a link to a host on a filter list shows the error page, and Retry is blocked again. The user wants a Load anyway button in Stage 3.
 
 ## Not individually confirmed
 
@@ -96,6 +93,13 @@ The user's report covered the main checks. These smaller ones came from the task
 - Make Default Browser: cancelling macOS's confirmation doesn't show a false error (only try this if you want pob as default).
 - A link from another app opens as a new active tab, also when pob isn't running. A saved local file comes back after a relaunch.
 - Memory pressure, if you want it: `sudo memory_pressure -S -l warn` with a running build shouldn't crash pob.
+
+### Downloads prompt, added after the main checks
+
+- The sheet names the file and site, Download keeps going, and Cancel leaves nothing behind.
+- After answering Download, the pill shows the filename. This is untested on a real sheet, because the Mac was locked.
+- ⌘-click a download link: the sheet appears on the front window.
+- Start a download in fullscreen video, then leave fullscreen: nothing hangs, and that page's next download still asks.
 
 ## Rulings made during the build
 
@@ -156,6 +160,8 @@ Every decision taken on the user's behalf, in order: what, why, and what it cost
 - Final: Ruling 45: after Cancel on the external-link sheet, that tab's requests are dropped for 3 seconds — reserved keys don't reach the window under a sheet, so a loop could trap the user — a real click after 3 s still prompts.
 - Final: Ruling 46: a capturing background tab can still show the external-link sheet, against the letter of Ruling 41 — it takes a live call the user started, and the sheet names the host — rare.
 - Ruling 47: Task 14's departures accepted — each is better than the brief, as the reviewer measured — no cost.
+- Ruling 48: an unasked failure keeps its row and notice, and its Retry asks — a dead-server click must not fail silently, and a page spamming rows gets no file — costs a few stray rows from a hostile page.
+- Ruling 49: Download stays the default button, as briefed — the user moves fast and the sheet exists to show the file and host — Return while typing could accept a page-raised sheet, for a quarantined file.
 
 ## Deferred minor findings
 
@@ -238,3 +244,4 @@ Found in review and left for later. The whole-branch review triaged them, and no
 - Task 14: compileContentRuleList holds the main thread 33-51 ms per list on first launch and weekly refresh; can't move
 - Task 14: the package prints unconvertible rules to stderr
 - Task 14: hostedTestsNeverBuildTheRealProfilesBlocker compares Mirror output; the main-actor stall test could flake on a loaded machine; ContentBlockerTests is 767 lines
+- Task 17: finish guard for a failure while a sheet is up has no test; webView.window first choice has no test; frontWindow closure can't be tested; pill fade completion no longer reached by tests; cancelledAt never pruned and keyed by address; offscreenWindow opens a window in hosted tests (justified)

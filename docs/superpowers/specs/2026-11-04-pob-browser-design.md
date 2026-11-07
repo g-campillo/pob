@@ -279,7 +279,7 @@ iCloud passkeys need the `com.apple.developer.web-browser.public-key-credential`
 
 ### Downloads, permissions and the rest
 
-- Downloads use `WKDownload`, listed in a popover from the rail with retry and reveal in Finder.
+- Downloads use `WKDownload`, listed in a popover from the rail with retry and reveal in Finder. pob asks before every download.
 - Camera, mic and location prompts appear as glass prompts, remembered per site per profile.
 - Screen sharing relies on WebKit's built-in prompt, which it uses when the private capture delegate isn't implemented. There's no public screen capture permission API in `WKUIDelegate`.
 - File uploads, JavaScript dialogs, printing, find in page, per-site zoom and default browser support use their standard public APIs.
@@ -374,7 +374,7 @@ Done when the user can switch to pob for a full work day, including a call with 
 
 ### Stage 3: Finish
 
-Profiles, private windows, bookmark import, Settings, the per-site ad blocker switch and a speed pass against the targets.
+Profiles, private windows, bookmark import, Settings, the per-site ad blocker switch, a Load anyway button for pages the ad blocker stops, and a speed pass against the targets.
 
 Done when every requirement in section 2 is met or has an agreed fallback.
 
