@@ -60,6 +60,8 @@ import WebKit
     func makeApp(_ profile: Profile = .temporary()) -> AppController {
         let settings = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString + ".json")
         let app = AppController()
+        app.profiles = ProfileList(file: JSONFile(url: profile.directory.appending(path: "profiles.json")))
+        app.makeProfile = { _ in profile }
         app.profile = profile
         app.appearance = AppearanceModel(store: SettingsStore(fileURL: settings), reduceTransparency: false)
         return app

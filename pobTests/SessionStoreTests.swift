@@ -307,6 +307,8 @@ private final class Reached {
     func makeApp(_ profile: Profile = .temporary()) -> AppController {
         let settings = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString + ".json")
         let app = AppController()
+        app.profiles = ProfileList(file: JSONFile(url: profile.directory.appending(path: "profiles.json")))
+        app.makeProfile = { _ in profile }
         app.profile = profile
         app.appearance = AppearanceModel(store: SettingsStore(fileURL: settings), reduceTransparency: false)
         return app
@@ -325,29 +327,32 @@ private final class Reached {
     // MARK: The snapshot
 
     @Test func aSnapshotCoversEveryWindow() {
-        let app = makeApp()
+        let profile = Profile.temporary()
+        let app = makeApp(profile)
         let first = [page("a"), page("b")]
         let second = [page("c")]
         app.openWindow(restoring: WindowSnapshot(tabs: first, activeIndex: 1, frame: ""))
         app.openWindow(restoring: WindowSnapshot(tabs: second, activeIndex: 0, frame: ""))
 
-        let windows = app.sessionSnapshot.windows
+        let windows = app.sessionSnapshot(of: profile).windows
         #expect(windows.map { $0.tabs.map(\.id) } == [first.map(\.id), second.map(\.id)])
         #expect(windows.map(\.activeIndex) == [1, 0])
     }
     @Test func aWindowWithNoTabsIsLeftOut() {
-        let app = makeApp()
+        let profile = Profile.temporary()
+        let app = makeApp(profile)
         app.openWindow(restoring: nil)
         #expect(app.windows.count == 1)
-        #expect(app.sessionSnapshot.windows.isEmpty)
+        #expect(app.sessionSnapshot(of: profile).windows.isEmpty)
 
         let kept = page("kept")
         app.openWindow(restoring: window(kept))
         #expect(app.windows.count == 2)
-        #expect(app.sessionSnapshot.windows.map { $0.tabs.map(\.id) } == [[kept.id]])
+        #expect(app.sessionSnapshot(of: profile).windows.map { $0.tabs.map(\.id) } == [[kept.id]])
     }
     @Test func closingAWindowDropsItFromTheSnapshot() {
-        let app = makeApp()
+        let profile = Profile.temporary()
+        let app = makeApp(profile)
         let closing = page("closing")
         let kept = page("kept")
         app.openWindow(restoring: window(closing))
@@ -355,7 +360,7 @@ private final class Reached {
 
         app.windows[0].perform(.closeWindow)
         #expect(app.windows.count == 1)
-        #expect(app.sessionSnapshot.windows.map { $0.tabs.map(\.id) } == [[kept.id]])
+        #expect(app.sessionSnapshot(of: profile).windows.map { $0.tabs.map(\.id) } == [[kept.id]])
     }
     @Test func theFrameComesBackThroughTheSnapshot() throws {
         let app = makeApp()
@@ -412,7 +417,7 @@ private final class Reached {
 
         let app = makeApp(profile)
         app.restoreSession()
-        #expect(app.sessionSnapshot.windows.map { $0.tabs.map(\.id) } == tabs.map { [$0.id] })
+        #expect(app.sessionSnapshot(of: profile).windows.map { $0.tabs.map(\.id) } == tabs.map { [$0.id] })
     }
     /// A window taking its saved frame is a moment part way through a restore, with only some windows open.
     @Test func aSavePartWayThroughARestoreIsHeld() throws {
@@ -424,7 +429,7 @@ private final class Reached {
         let observer = NotificationCenter.default.addObserver(forName: NSWindow.didResizeNotification, object: nil, queue: nil) { _ in
             MainActor.assumeIsolated {
                 reached.value = true
-                profile.session.save(app.sessionSnapshot)
+                profile.session.save(app.sessionSnapshot(of: profile))
             }
         }
         defer { NotificationCenter.default.removeObserver(observer) }
@@ -526,7 +531,7 @@ private final class Reached {
         let controller = app.windows[0]
         controller.perform(.closeTab)
         #expect(app.windows.count == 1)
-        #expect(app.sessionSnapshot.windows.isEmpty)
+        #expect(app.sessionSnapshot(of: profile).windows.isEmpty)
         #expect(await eventually { sessionFile(of: profile).load() == SessionSnapshot(windows: []) })
 
         controller.perform(.reopenTab)

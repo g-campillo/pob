@@ -7,9 +7,14 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     private(set) var windows: [WindowController] = []
-    /// Both are set at launch, past the test-host check, so a test run can't reach the real profile. Tests set their own.
+    /// The list, `profile` and `appearance` are set at launch, past the test-host check, so a test run can't reach the
+    /// real profiles. Tests set their own.
+    var profiles: ProfileList?
+    /// Where a window opens when nothing says otherwise: the first listed profile.
     var profile: Profile?
     var appearance: AppearanceModel?
+    /// Replaceable so a test gets temporary profiles and never the real folder.
+    var makeProfile: (UUID) -> Profile = { Profile.persistent(id: $0) }
     /// Replaceable so a test can't change the Mac's default browser.
     var requestDefault: (String) async throws -> Void = {
         try await NSWorkspace.shared.setDefaultApplication(at: Bundle.main.bundleURL, toOpenURLsWithScheme: $0)
@@ -17,6 +22,8 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// Links that arrive before the session is back wait here, so a restored window isn't replaced.
     private var pendingLinks: [AddressInput] = []
     private var hasRestored = false
+    /// Every profile that has had a window, in the order they first did.
+    private var preparedProfiles: [Profile] = []
     private var commands: CommandList?
     private var keyMonitor: Any?
     private var displayOptionsObserver: NSObjectProtocol?
@@ -38,8 +45,8 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     /// Reads every live page's state, so it's built when a save happens and not on every change.
-    var sessionSnapshot: SessionSnapshot {
-        SessionSnapshot(windows: windows.compactMap(\.snapshot))
+    func sessionSnapshot(of profile: Profile) -> SessionSnapshot {
+        SessionSnapshot(windows: windows.filter { $0.tabs.profile === profile }.compactMap(\.snapshot), parked: profile.parked)
     }
 
     static func main() {
@@ -52,17 +59,11 @@ final class AppController: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         guard !Self.isRunningTests else { return }
 
-        profile = .initial
-        // Every window shares the profile's downloads, so only the key window shows the notice.
-        Profile.initial.downloads.onStart = { [weak self] name in
-            self?.noticeController(keyWindow: NSApp.keyWindow)?.showNotice(name)
-        }
-        // A background tab or a closed popup has no window of its own to ask in.
-        Profile.initial.downloads.frontWindow = { [weak self] in
-            guard let self else { return nil }
-            return (controller(of: NSApp.keyWindow) ?? NSApp.orderedWindows.lazy.compactMap(controller(of:)).first)?.window
-        }
-        Task { await Profile.initial.history.prune(before: Date().addingTimeInterval(-365 * 86_400)) }
+        // Stage 3 moved the rules to pob/rules, shared by every profile.
+        try? FileManager.default.removeItem(at: Profile.initial.directory.appending(path: "rules"))
+        let profiles = ProfileList(file: JSONFile(url: ProfileList.defaultFileURL))
+        self.profiles = profiles
+        profile = makeProfile(profiles.all[0].id)
         prepareFilterLists()
 
         let appearance = AppearanceModel(
@@ -85,7 +86,14 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// A test run has no windows, so saving here would blank the real session.
     func applicationWillTerminate(_ notification: Notification) {
         guard !Self.isRunningTests else { return }
-        profile?.session.save(sessionSnapshot)
+        saveAllSessions()
+    }
+
+    /// Returns with every session on disk, so it's safe to call at quit.
+    func saveAllSessions() {
+        for profile in preparedProfiles {
+            profile.session.save(sessionSnapshot(of: profile))
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -100,15 +108,19 @@ final class AppController: NSObject, NSApplicationDelegate {
         return true
     }
 
-    /// Opens the saved windows, or one empty window when there are none, as after a session that failed to load.
+    /// Opens every profile's saved windows, or one empty window when there are none, as after a session that failed to load.
     func restoreSession() {
-        profile?.session.restore { session in
-            for window in session.windows {
-                openWindow(restoring: window)
+        for info in profiles?.all ?? [] {
+            let profile = makeProfile(info.id)
+            profile.session.restore { session in
+                profile.parked = session.parked
+                for window in session.windows {
+                    openWindow(restoring: window, in: profile)
+                }
             }
-            if windows.isEmpty, pendingLinks.isEmpty {
-                openWindow(restoring: nil)
-            }
+        }
+        if windows.isEmpty, pendingLinks.isEmpty {
+            openWindow(restoring: nil)
         }
         hasRestored = true
         let links = pendingLinks
@@ -158,8 +170,9 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     /// A window opened from another steps away from it. Exactly on top, it would look as if nothing had happened.
-    func openWindow(restoring snapshot: WindowSnapshot?, cascadingFrom parent: NSWindow? = nil) {
-        guard let profile, let appearance else { return }
+    func openWindow(restoring snapshot: WindowSnapshot?, in profile: Profile? = nil, cascadingFrom parent: NSWindow? = nil) {
+        guard let profile = profile ?? self.profile, let appearance else { return }
+        prepare(profile)
         let controller = WindowController(appearance: appearance, tabs: TabManager(profile: profile, restoring: snapshot))
         if let snapshot, snapshot.hasFiniteFrame {
             controller.window?.setFrame(from: snapshot.frame)
@@ -168,15 +181,17 @@ final class AppController: NSObject, NSApplicationDelegate {
             let stepped = window.cascadeTopLeft(from: NSPoint(x: parent.frame.minX, y: parent.frame.maxY))
             window.cascadeTopLeft(from: stepped)
         }
-        controller.onTabsChanged = { [weak self] in self?.saveSessionSoon() }
-        controller.onNewWindow = { [weak self, weak controller] in self?.openWindow(restoring: nil, cascadingFrom: controller?.window) }
+        controller.onTabsChanged = { [weak self] in self?.saveSessionSoon(profile) }
+        controller.onNewWindow = { [weak self, weak controller] in
+            self?.openWindow(restoring: nil, in: profile, cascadingFrom: controller?.window)
+        }
         controller.onMakeDefaultBrowser = { [weak self, weak controller] in
             guard let self else { return }
             Task { await self.makeDefaultBrowser(keyWindow: controller?.window) }
         }
         controller.onClose = { [weak self, weak controller] in
             self?.windows.removeAll { $0 === controller }
-            self?.saveSessionSoon()
+            self?.saveSessionSoon(profile)
         }
         windows.append(controller)
 
@@ -207,8 +222,24 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     /// Holds `self` until the save runs, because a snapshot taken after it was gone would be empty.
-    private func saveSessionSoon() {
-        profile?.session.saveSoon { self.sessionSnapshot }
+    private func saveSessionSoon(_ profile: Profile) {
+        profile.session.saveSoon { self.sessionSnapshot(of: profile) }
+    }
+
+    /// Once per profile, with its first window.
+    private func prepare(_ profile: Profile) {
+        guard !preparedProfiles.contains(where: { $0 === profile }) else { return }
+        preparedProfiles.append(profile)
+        // Every window shares the profile's downloads, so only the key window shows the notice.
+        profile.downloads.onStart = { [weak self] name in
+            self?.noticeController(keyWindow: NSApp.keyWindow)?.showNotice(name)
+        }
+        // A background tab or a closed popup has no window of its own to ask in.
+        profile.downloads.frontWindow = { [weak self] in
+            guard let self else { return nil }
+            return (controller(of: NSApp.keyWindow) ?? NSApp.orderedWindows.lazy.compactMap(controller(of:)).first)?.window
+        }
+        Task { await profile.history.prune(before: Date().addingTimeInterval(-365 * 86_400)) }
     }
 
     private func observeDisplayOptions(_ appearance: AppearanceModel) {
