@@ -1,7 +1,8 @@
 import Foundation
 
-/// Reads the Netscape bookmark files Safari and Chrome export. The file is untrusted, so every quantifier is bounded.
-enum BookmarkImport {
+/// Reads the Netscape bookmark files Safari and Chrome export. The file is untrusted, so the scan is one forward pass:
+/// no position is read twice, and a tag whose `>` (or an `<a>` or `<h3>` whose closing tag) is missing ends the parse.
+nonisolated enum BookmarkImport {
     struct Item: Equatable {
         var title: String
         var url: URL
@@ -9,33 +10,93 @@ enum BookmarkImport {
     }
 
     static func parse(_ html: String) -> [Item] {
-        let token = #/<h3\b[^>]{0,20000}>(.{0,2000}?)</h3\s*>|(<dl\b[^>]{0,20000}>)|(</dl\s*>)|<a\b([^>]{0,20000})>(.{0,2000}?)</a\s*>/#
-            .ignoresCase().dotMatchesNewlines()
-        let href = #/\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/#.ignoresCase()
+        let b = Array(html.utf8)
         let tag = #/<[^>]*>/#
         var stack: [String?] = []
         var pending: String?
         var items: [Item] = []
-        for match in html.matches(of: token) {
-            if let name = match.1 {
-                pending = decode(String(name)).collapsingWhitespace
-            } else if match.2 != nil {
+        var i = 0
+        while let lt = b[i...].firstIndex(of: UInt8(ascii: "<")) {
+            var nameEnd = lt + 1
+            while nameEnd < b.count, b[nameEnd] == UInt8(ascii: "/") || isLetterOrDigit(b[nameEnd]) { nameEnd += 1 }
+            let name = String(decoding: b[(lt + 1)..<nameEnd], as: UTF8.self).lowercased()
+            i = lt + 1
+            guard ["h3", "dl", "/dl", "a"].contains(name),
+                  nameEnd == b.count || isSpace(b[nameEnd]) || b[nameEnd] == UInt8(ascii: ">") || b[nameEnd] == UInt8(ascii: "/")
+            else { continue }
+            guard let gt = b[nameEnd...].firstIndex(of: UInt8(ascii: ">")) else { return items }
+            i = gt + 1
+            switch name {
+            case "dl":
                 stack.append(pending)
                 pending = nil
-            } else if match.3 != nil {
+            case "/dl":
                 _ = stack.popLast()
-            } else if let attributes = match.4, let inner = match.5 {
-                guard let found = String(attributes).firstMatch(of: href),
-                      let raw = found.1 ?? found.2 ?? found.3,
-                      let url = URL(string: decode(String(raw))),
-                      let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
-                      let host = url.host() else { continue }
-                let title = decode(String(inner).replacing(tag, with: "")).collapsingWhitespace
-                let folder = stack.compactMap { $0 }.joined(separator: " / ")
-                items.append(Item(title: title.isEmpty ? host : title, url: url, folder: folder.isEmpty ? nil : folder))
+            default:
+                let closing = Array((name == "a" ? "</a" : "</h3").utf8)
+                guard let end = find(closing, in: b, from: i) else { return items }
+                let inner = String(decoding: b[i..<end], as: UTF8.self)
+                i = end + closing.count
+                let text = decode(inner.replacing(tag, with: "")).collapsingWhitespace
+                if name == "h3" {
+                    pending = text
+                } else if let url = webURL(href(in: b[nameEnd..<gt])), let host = url.host() {
+                    let folder = stack.compactMap { $0 }.joined(separator: " / ")
+                    items.append(Item(title: text.isEmpty ? host : text, url: url, folder: folder.isEmpty ? nil : folder))
+                }
             }
         }
         return items
+    }
+
+    private static func isSpace(_ c: UInt8) -> Bool { c == 32 || (9...13).contains(c) }
+    private static func isLetterOrDigit(_ c: UInt8) -> Bool {
+        (UInt8(ascii: "a")...UInt8(ascii: "z")).contains(c | 0x20) || (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(c)
+    }
+
+    /// The first position at or after `from` where `prefix` appears, ignoring case.
+    private static func find(_ prefix: [UInt8], in b: [UInt8], from: Int) -> Int? {
+        var i = from
+        while let lt = b[i...].firstIndex(of: UInt8(ascii: "<")) {
+            if lt + prefix.count <= b.count, zip(b[lt..<(lt + prefix.count)], prefix).allSatisfy({ $0 | 0x20 == $1 | 0x20 }) { return lt }
+            i = lt + 1
+        }
+        return nil
+    }
+
+    /// The value of the attribute named exactly `href`, so `data-href` doesn't count.
+    private static func href(in attrs: ArraySlice<UInt8>) -> String? {
+        var i = attrs.startIndex
+        let end = attrs.endIndex
+        while i < end {
+            while i < end, isSpace(attrs[i]) || attrs[i] == UInt8(ascii: "/") { i += 1 }
+            let nameStart = i
+            while i < end, !isSpace(attrs[i]), attrs[i] != UInt8(ascii: "="), attrs[i] != UInt8(ascii: "/") { i += 1 }
+            let name = String(decoding: attrs[nameStart..<i], as: UTF8.self).lowercased()
+            while i < end, isSpace(attrs[i]) { i += 1 }
+            guard i < end, attrs[i] == UInt8(ascii: "=") else { continue }
+            i += 1
+            while i < end, isSpace(attrs[i]) { i += 1 }
+            let valueStart: Int, valueEnd: Int
+            if i < end, attrs[i] == UInt8(ascii: "\"") || attrs[i] == UInt8(ascii: "'") {
+                let quote = attrs[i]
+                valueStart = i + 1
+                valueEnd = attrs[valueStart...].firstIndex(of: quote) ?? end
+                i = min(valueEnd + 1, end)
+            } else {
+                valueStart = i
+                while i < end, !isSpace(attrs[i]) { i += 1 }
+                valueEnd = i
+            }
+            if name == "href" { return String(decoding: attrs[valueStart..<valueEnd], as: UTF8.self) }
+        }
+        return nil
+    }
+
+    private static func webURL(_ raw: String?) -> URL? {
+        guard let raw, let url = URL(string: decode(raw)), let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https", url.host() != nil else { return nil }
+        return url
     }
 
     /// `&amp;` goes last so `&amp;lt;` reads as the text `&lt;`.
@@ -52,5 +113,5 @@ enum BookmarkImport {
 }
 
 private extension String {
-    var collapsingWhitespace: String { split(whereSeparator: \.isWhitespace).joined(separator: " ") }
+    nonisolated var collapsingWhitespace: String { split(whereSeparator: \.isWhitespace).joined(separator: " ") }
 }

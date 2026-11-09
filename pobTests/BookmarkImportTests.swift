@@ -62,9 +62,17 @@ import Testing
         #expect(BookmarkImport.parse(html).count == 5_000)
     }
     @Test func brokenMarkupNeitherCrashesNorHangs() {
-        let junk = String(repeating: "<a href=\"https://z.example/", count: 20_000) + String(repeating: "</dl><h3>", count: 1_000)
-        #expect(BookmarkImport.parse(junk).isEmpty)
-        #expect(BookmarkImport.parse("<a href=https://u.example/ >U</a><dl></dl></dl><a href='https://q.example/'>&#x41;&#9999999999;</a>").map(\.title) == ["U", "A&#9999999999;"])
+        // About 1 MB of tags that never close, so a scan that backtracks per tag would take minutes.
+        let junk = String(repeating: "<a href=\"https://z.example/ <h3 x <dl ", count: 25_000) + String(repeating: "</dl><h3>", count: 1_000)
+        let clock = ContinuousClock()
+        let elapsed = clock.measure { #expect(BookmarkImport.parse(junk).isEmpty) }
+        #expect(elapsed < .seconds(1))
+        #expect(BookmarkImport.parse("<a href=https://u.example/ >U</a><dl></dl></dl><a data-href='https://no.example/' href='https://q.example/'>&#x41;&#9999999999;</a>").map(\.title) == ["U", "A&#9999999999;"])
+    }
+    @Test func aHugeIconAttributeDoesntDropTheBookmark() {
+        let icon = String(repeating: "A", count: 100_000)
+        let items = BookmarkImport.parse("<DT><A HREF=\"https://big.example/\" ICON=\"data:image/png;base64,\(icon)\">Big</A>")
+        #expect(items.map(\.title) == ["Big"])
     }
 
     // MARK: The command

@@ -171,20 +171,20 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         importTask = Task { [weak self] in
             defer { self?.importTask = nil }
             guard let self, let file = await chooseImportFile(window) else { return }
-            guard let text = Self.readImportFile(file) else {
+            // Off the main actor: a large file must not freeze the window.
+            guard let items = await Task.detached(operation: { Self.readImportFile(file).map(BookmarkImport.parse) }).value else {
                 let alert = NSAlert()
                 alert.messageText = "Couldn't read that file"
                 alert.informativeText = "Choose a bookmarks file under 50 MB exported from Safari or Chrome."
                 if let window { await alert.beginSheetModal(for: window) } else { alert.runModal() }
                 return
             }
-            let items = BookmarkImport.parse(text)
             let added = tabs.profile.bookmarks.importBookmarks(items)
             showNotice(items.isEmpty ? "No bookmarks found" : added == 0 ? "No new bookmarks" : "Imported \(added) bookmark\(added == 1 ? "" : "s")")
         }
     }
 
-    private static func readImportFile(_ url: URL) -> String? {
+    nonisolated private static func readImportFile(_ url: URL) -> String? {
         guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size < 50_000_000,
               let data = try? Data(contentsOf: url) else { return nil }
         return String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1)
