@@ -13,7 +13,7 @@ enum MainMenu {
         addSubmenu("Edit", to: menu, items: editItems() + [.separator()] + items(for: [.find], in: commands))
         addSubmenu("View", to: menu, items: items(for: [.toggleRail, .snapOpaque], in: commands)
             + [.separator()] + items(for: [.zoomIn, .zoomOut, .actualSize], in: commands) + [plusZoomItem(in: commands)].compactMap { $0 })
-        addSubmenu("Bookmarks", to: menu, items: items(for: [.bookmarkPage], in: commands))
+        addSubmenu("Bookmarks", to: menu, items: items(for: [.bookmarkPage, .importBookmarks], in: commands))
         addSubmenu("Go", to: menu, items: items(
             for: [.back, .forward, .reload, .focusAddress, .openSwitcherFromPage],
             in: commands

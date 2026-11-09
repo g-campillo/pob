@@ -113,4 +113,21 @@ import Testing
         controller.openBookmark(Bookmark(id: UUID(), title: "Hi", url: URL(string: "data:text/html,hi")!, folder: nil, isPinned: true))
         #expect(tabs.list.records.count == 1)
     }
+    @Test func importSkipsWhatsThereAndSavesOnce() {
+        let store = BookmarkStore(file: file())
+        store.toggle(url: URL(string: "https://a.example/")!, title: "A")
+        var heard = 0
+        store.addObserver { heard += 1 }
+        let b = BookmarkImport.Item(title: "B", url: URL(string: "https://b.example/")!, folder: "F")
+        let added = store.importBookmarks([.init(title: "A again", url: URL(string: "https://a.example/")!, folder: nil), b, b])
+        #expect(added == 1 && heard == 1)
+        #expect(store.all.map(\.title) == ["A", "B"])
+        #expect(store.all[1].folder == "F" && !store.all[1].isPinned)
+    }
+    @Test func importingNothingNewStaysQuiet() {
+        let store = BookmarkStore(file: file())
+        var heard = 0
+        store.addObserver { heard += 1 }
+        #expect(store.importBookmarks([]) == 0 && heard == 0)
+    }
 }

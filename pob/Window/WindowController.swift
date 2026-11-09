@@ -1,4 +1,5 @@
 import AppKit
+import UniformTypeIdentifiers
 import WebKit
 
 final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDelegate {
@@ -153,6 +154,42 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
     /// Replaceable so a test can't open System Settings.
     var openURL: (URL) -> Void = { NSWorkspace.shared.open($0) }
 
+    /// Replaceable because tests can't show a sheet. Nil means cancelled.
+    var chooseImportFile: @MainActor (NSWindow?) async -> URL? = { window in
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.html]
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose a bookmarks file exported from Safari or Chrome"
+        guard let window else { return panel.runModal() == .OK ? panel.url : nil }
+        return await panel.beginSheetModal(for: window) == .OK ? panel.url : nil
+    }
+    /// The import in progress, for tests to wait on.
+    private(set) var importTask: Task<Void, Never>?
+
+    private func importBookmarks() {
+        guard importTask == nil else { return }
+        importTask = Task { [weak self] in
+            defer { self?.importTask = nil }
+            guard let self, let file = await chooseImportFile(window) else { return }
+            guard let text = Self.readImportFile(file) else {
+                let alert = NSAlert()
+                alert.messageText = "Couldn't read that file"
+                alert.informativeText = "Choose a bookmarks file under 50 MB exported from Safari or Chrome."
+                if let window { await alert.beginSheetModal(for: window) } else { alert.runModal() }
+                return
+            }
+            let items = BookmarkImport.parse(text)
+            let added = tabs.profile.bookmarks.importBookmarks(items)
+            showNotice(items.isEmpty ? "No bookmarks found" : added == 0 ? "No new bookmarks" : "Imported \(added) bookmark\(added == 1 ? "" : "s")")
+        }
+    }
+
+    private static func readImportFile(_ url: URL) -> String? {
+        guard let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size < 50_000_000,
+              let data = try? Data(contentsOf: url) else { return nil }
+        return String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1)
+    }
+
     func perform(_ id: CommandID) {
         if !switcher.isHidden, id != .openSwitcher, id != .openSwitcherFromPage {
             // Commands act on the window, and several of them move the keyboard, so the panel can't stay up over them.
@@ -235,6 +272,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
             openInSafari()
         case .signIn:
             showSignInPopover()
+        case .importBookmarks: importBookmarks()
         case .bookmarkPage:
             guard let webView = tab?.webView, let url = webView.url, url.scheme != "about" else { return }
             tabs.profile.bookmarks.toggle(url: url, title: webView.title?.isEmpty == false ? webView.title! : url.host() ?? url.absoluteString)

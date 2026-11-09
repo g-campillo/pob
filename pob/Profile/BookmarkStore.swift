@@ -38,6 +38,17 @@ final class BookmarkStore {
         changed()
     }
 
+    /// Skips addresses already saved, saves once and tells the observers once. Returns how many were added.
+    @discardableResult
+    func importBookmarks(_ items: [BookmarkImport.Item]) -> Int {
+        var known = Set(all.map(\.url))
+        let fresh = items.filter { known.insert($0.url).inserted }
+        guard !fresh.isEmpty else { return 0 }
+        all += fresh.map { Bookmark(id: UUID(), title: $0.title, url: $0.url, folder: $0.folder, isPinned: false) }
+        changed()
+        return fresh.count
+    }
+
     func setPinned(_ isPinned: Bool, id: UUID) {
         guard let index = all.firstIndex(where: { $0.id == id }) else { return }
         all[index].isPinned = isPinned
