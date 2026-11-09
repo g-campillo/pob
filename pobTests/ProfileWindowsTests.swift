@@ -109,6 +109,18 @@ import Testing
         #expect(asked == 1)
         #expect(app.windows[0].tabs.profile === a && a.parked == nil)
     }
+    /// The sheet promises the call ends, which only holds if nothing keeps the old window's pages alive.
+    @Test func aConfirmedSwitchReleasesTheOldWindowAndItsPages() async {
+        let (app, a, _) = app()
+        app.openWindow(restoring: window("https://call.example/", "https://other.example/"), in: a)
+        app.windows[0].tabs.isCapturing = { _ in true }
+        app.confirmSwitch = { _ in true }
+        weak let old = app.windows[0]
+        weak let webView = app.windows[0].tab?.webView
+        #expect(webView != nil)
+        await app.switchProfile(of: app.windows[0], to: bID(app))
+        #expect(await eventually { old == nil && webView == nil })
+    }
     @Test func theMenuListsEveryProfileAndChecksThisOne() {
         let (app, a, _) = app()
         app.openWindow(restoring: nil, in: a)
