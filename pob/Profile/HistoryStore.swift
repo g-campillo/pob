@@ -101,8 +101,14 @@ actor HistoryStore {
         }
     }
 
+    /// Leaves nothing readable in the file. A delete alone keeps the rows in free pages and the terms in old index
+    /// segments, so the index is rebuilt, empty, and the file rewritten without the free pages.
     func clear() {
-        transaction { run("DELETE FROM history_fts") && run("DELETE FROM visits") }
+        transaction {
+            run("DELETE FROM history_fts") && run("DELETE FROM visits")
+                && run("INSERT INTO history_fts(history_fts) VALUES('rebuild')")
+        }
+        run("VACUUM")
     }
 
     // MARK: SQLite

@@ -54,6 +54,20 @@ import Testing
         await store.record(url: URL(string: "https://a.example/")!, title: "Alpha")
         #expect(await store.search("Alpha", limit: 10).first?.visitCount == 1)
     }
+    /// Clearing is for privacy, so nothing may stay readable in the file: not in its free pages, not in the search index.
+    @Test func clearLeavesNothingInTheFile() async throws {
+        let file = file()
+        let history = HistoryStore(file: file)
+        for index in 0..<500 { // enough for free pages and several index segments
+            await history.record(url: URL(string: "https://zyxwv\(index).example/")!, title: "Quuxplorer \(index)")
+        }
+        #expect(try Data(contentsOf: file).range(of: Data("Quuxplorer".utf8)) != nil)
+        await history.clear()
+        let bytes = try Data(contentsOf: file)
+        for secret in ["Quuxplorer", "quuxplorer", "zyxwv"] { // the index keeps terms lowercased
+            #expect(bytes.range(of: Data(secret.utf8)) == nil, "\(secret) is still in the file")
+        }
+    }
     @Test func anUnopenableFileDoesntCrash() async {
         let history = HistoryStore(file: URL(fileURLWithPath: "/nonexistent/folder/h.sqlite"))
         await history.record(url: deploy, title: "x")
