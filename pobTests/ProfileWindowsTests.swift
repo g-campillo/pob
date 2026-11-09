@@ -33,6 +33,7 @@ import Testing
         b.session.save(SessionSnapshot(windows: [], parked: parked))
         app.restoreSession()
         #expect(b.parked == parked)
+        app.openWindow(restoring: nil, in: b) // so the save below really writes b
         app.saveAllSessions()
         #expect(b.session.load().parked == parked)
     }
