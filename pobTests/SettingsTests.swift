@@ -231,6 +231,41 @@ import Testing
         app.saveAllSessions()
         #expect(!FileManager.default.fileExists(atPath: b.directory.path()))
     }
+    /// The store's removal can take seconds, and the profile is still listed until it's gone.
+    @Test func aDeleteUnderWayCountsAsDone() async throws {
+        let (app, _, b) = ProfileWindowsTests().app()
+        try FileManager.default.createDirectory(at: b.directory, withIntermediateDirectories: true)
+        var started = false
+        let (gate, release) = AsyncStream<Void>.makeStream()
+        app.removeDataStore = { id in
+            guard id == Profile.initialID else { return }
+            started = true
+            for await _ in gate {} // until it's released
+        }
+        app.openSettings()
+        let model = try #require(app.settingsWindow?.model)
+        let first = Task { try await model.delete(Profile.initialID) }
+        #expect(await eventually { started })
+        #expect(!app.canDeleteProfile(b.id) && !app.canDeleteProfile(Profile.initialID))
+        #expect(model.deleting == [Profile.initialID])
+        await #expect(throws: ProfileInUse.self) { try await app.deleteProfile(b.id) }
+        let again = Task { try await app.deleteProfile(Profile.initialID) }
+        await Task.yield()
+        release.finish()
+        try await first.value
+        await #expect(throws: ProfileInUse.self) { try await again.value }
+        #expect(app.profiles?.all.map(\.id) == [b.id])
+        #expect(FileManager.default.fileExists(atPath: b.directory.path()))
+        #expect(model.deleting.isEmpty)
+    }
+    /// The test host has pob's bundle id, so the real removal would reach the user's own stores.
+    @Test func aTestThatForgetsTheSeamRemovesNothing() async throws {
+        let (app, _, b) = ProfileWindowsTests().app()
+        try FileManager.default.createDirectory(at: b.directory, withIntermediateDirectories: true)
+        await #expect(throws: CocoaError.self) { try await app.deleteProfile(b.id) }
+        #expect(FileManager.default.fileExists(atPath: b.directory.path()))
+        #expect(app.profiles?.all.count == 2)
+    }
     @Test func deletingFromSettingsClearsTheSelection() async throws {
         let (app, _, b) = ProfileWindowsTests().app()
         app.removeDataStore = { _ in }

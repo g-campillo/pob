@@ -8,6 +8,8 @@ import Observation
         didSet { appearance.searchEngine = searchEngine }
     }
     var selectedProfileID: UUID?
+    /// So Settings redraws while a delete runs. `AppController` keeps its own guard.
+    private(set) var deleting: Set<UUID> = []
     /// `AppController` sets these.
     @ObservationIgnored var makeDefaultBrowser: () -> Void = {}
     /// nil for an id that isn't listed.
@@ -56,6 +58,8 @@ import Observation
     }
 
     func delete(_ id: UUID) async throws {
+        deleting.insert(id)
+        defer { deleting.remove(id) }
         try await deleteProfile(id)
         if selectedProfileID == id { selectedProfileID = nil }
     }

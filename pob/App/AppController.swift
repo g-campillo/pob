@@ -27,6 +27,10 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// Replaceable so a test never removes a real store. WebKit refuses until the last page of a dropped store has
     /// closed, a moment later, so this keeps trying for two seconds.
     var removeDataStore: @MainActor (UUID) async throws -> Void = { id in
+        // The test host has pob's bundle id, so a test that forgets to replace this would reach the user's own stores.
+        guard !AppController.isRunningTests else {
+            throw CocoaError(.featureUnsupported, userInfo: [NSLocalizedDescriptionKey: "A test must replace removeDataStore."])
+        }
         for attempt in 1... {
             do {
                 return try await WKWebsiteDataStore.remove(forIdentifier: id)
@@ -48,6 +52,8 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// Links that arrive before the session is back wait here, so a restored window isn't replaced.
     private var pendingLinks: [AddressInput] = []
     private var hasRestored = false
+    /// Still listed until their stores are gone, which can take seconds.
+    private var deletingProfiles: Set<UUID> = []
     /// Every profile that has had a window, in the order they first did.
     private var preparedProfiles: [Profile] = []
     private var commands: CommandList?
@@ -278,9 +284,11 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// More than one profile, and no window open in it or in a private window opened from it, which writes to its bookmarks.
+    /// More than one profile once those being deleted are gone, and no window open in it or in a private window opened
+    /// from it, which writes to its bookmarks.
     func canDeleteProfile(_ id: UUID) -> Bool {
-        guard let profiles, profiles.all.count > 1, profiles.name(of: id) != nil else { return false }
+        guard let profiles, !deletingProfiles.contains(id), profiles.all.count - deletingProfiles.count > 1,
+              profiles.name(of: id) != nil else { return false }
         return !windows.contains { $0.tabs.profile.id == id || $0.tabs.profile.parent?.id == id }
     }
 
@@ -288,6 +296,8 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// Favicons are shared by every profile, so they stay.
     func deleteProfile(_ id: UUID) async throws {
         guard let profiles, canDeleteProfile(id) else { throw ProfileInUse() }
+        deletingProfiles.insert(id)
+        defer { deletingProfiles.remove(id) }
         let deleted = makeProfile(id)
         deleted.dropSpareTab()
         deleted.dropDataStore()

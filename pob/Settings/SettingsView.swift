@@ -41,7 +41,8 @@ private struct ProfileData: View {
     @State private var failure = ""
 
     private var deleteCaption: String? {
-        if model.profiles.count < 2 { return "pob needs at least one profile" }
+        if model.deleting.contains(profile.id) { return "Deleting…" }
+        if model.profiles.count - model.deleting.count < 2 { return "pob needs at least one profile" }
         return model.canDelete(profile.id) ? nil : "Close this profile's windows first"
     }
 
