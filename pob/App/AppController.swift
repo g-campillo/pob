@@ -159,10 +159,14 @@ final class AppController: NSObject, NSApplicationDelegate {
         if windows.isEmpty { openWindow(restoring: nil) }
         guard let target = controller(of: keyWindow) ?? frontController else { return }
         links.forEach(target.openLink)
-        if !Self.isRunningTests {
-            target.window?.makeKeyAndOrderFront(nil)
-            NSApp.activate()
-        }
+        bringForward(target)
+    }
+
+    /// Key and in front, from minimized too. Hosted windows stay off screen.
+    private func bringForward(_ controller: WindowController) {
+        guard !Self.isRunningTests else { return }
+        controller.window?.makeKeyAndOrderFront(nil)
+        NSApp.activate()
     }
 
     /// macOS asks the user to confirm each scheme itself, and this works with no window open.
@@ -263,7 +267,8 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     /// Commands act on the key window. Anything else that's key keeps its keys, so "no window" means nothing is key
     /// and no browser window is showing. A minimized one doesn't count, or ⌘N would do nothing. Settings isn't a browser
-    /// window, so from there commands go to the front one, as if none were key, except that ⌘W closes Settings.
+    /// window, so from there commands go to the front one, as if none were key, except that ⌘W closes Settings. That
+    /// window comes forward first, or the switcher or field a command opens would have no keyboard.
     func perform(_ id: CommandID, keyWindow: NSWindow?) {
         let isSettingsKey = keyWindow != nil && keyWindow === settingsWindow?.window
         if id == .makeDefaultBrowser {
@@ -275,6 +280,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         } else if isSettingsKey, [.closeTab, .closeWindow].contains(id) {
             settingsWindow?.close()
         } else if isSettingsKey, let controller = frontController {
+            bringForward(controller)
             controller.perform(id)
         } else if keyWindow == nil || isSettingsKey, !isShowingAWindow, [.openSwitcher, .openSwitcherFromPage, .newWindow, .newPrivateWindow].contains(id) {
             openWindow(restoring: nil, in: id == .newPrivateWindow ? profile.map(Profile.makePrivate(from:)) : nil)

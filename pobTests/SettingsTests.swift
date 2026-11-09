@@ -79,10 +79,14 @@ import Testing
         #expect(window.contentLayoutRect.width == 480 && window.contentLayoutRect.height > 300)
         #expect(window.title == "Settings" && window.styleMask == [.titled, .closable] && !window.isReleasedWhenClosed)
     }
+    /// Hosted windows are never visible, so ⌘N alone would pass by opening a window as if none were showing. ⌘T can only
+    /// pass by reaching the window that's there.
     @Test func commandsFromSettingsReachTheFrontBrowserWindow() {
         let (app, a, _) = ProfileWindowsTests().app()
-        app.openWindow(restoring: nil, in: a)
+        app.openWindow(restoring: ProfileWindowsTests().window("https://a.example/"), in: a) // a tab, so no switcher yet
         app.perform(.openSettings, keyWindow: nil)
+        app.perform(.openSwitcher, keyWindow: app.settingsWindow?.window)
+        #expect(app.windows.count == 1 && !app.windows[0].switcher.isHidden)
         app.perform(.newWindow, keyWindow: app.settingsWindow?.window)
         #expect(app.windows.count == 2)
     }
