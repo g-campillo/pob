@@ -179,9 +179,13 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
     ) {
         arrivedByHistory = navigationAction.navigationType == .backForward
         if navigationAction.request.url?.absoluteString == ErrorPage.loadAnywayAddress {
-            // Before the other-app check, which would offer it to an app. Any page can link here, so only the blocked page's own link counts.
+            // Before the other-app check, which would offer it to an app. Any page can link here, and another window can set this
+            // one's location to it, so only a click on the blocked page itself counts.
             decisionHandler(.cancel)
-            if isShowingBlockedPage, let url = webView.url, let host = url.host() {
+            let source = navigationAction.sourceFrame
+            // The committed page, because during a load `webView.url` holds the target.
+            if isShowingBlockedPage, navigationAction.navigationType == .linkActivated, source.webView === webView, source.isMainFrame,
+               let url = webView.backForwardList.currentItem?.url, let host = url.host() {
                 unblockedHost = host
                 webView.load(URLRequest(url: url))
             }

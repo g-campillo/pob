@@ -763,6 +763,31 @@ private nonisolated final class StubServer: URLProtocol {
         #expect(tab.unblockedHost == nil)
         #expect(try await !askForBoth(in: tab, scheme))
     }
+    /// A page can open a popup, send it to a listed host, then set its location or aim a link at it by name.
+    /// The first arrives as `.other`, the second as a click from another web view, and neither may count.
+    @Test func anotherWindowCantUseTheLink() async throws {
+        let blocker = try blocker(bundled: listFolder("||blocked.example^"))
+        await blocker.prepare()
+        let (controller, opener, scheme) = try window(blockingWith: blocker, page: "<a href='pob:load-anyway' target='ad'>x</a>")
+        await open(opener)
+        // The rules stop a popup opened straight to a listed host, so it goes there after opening.
+        #expect(try await opener.webView.evaluateJavaScript("(window.w = window.open('pobtest://other.example/', 'ad')) !== null") as? Bool == true)
+        #expect(await eventually { controller.tab !== opener })
+        let popup = try #require(controller.tab)
+        #expect(await eventually { popup.webView.url?.host() == "other.example" && !popup.webView.isLoading })
+        await finishLoading(popup) { opener.webView.evaluateJavaScript("w.location = 'pobtest://blocked.example/'", completionHandler: nil) }
+        #expect(await eventually { popup.title == "pob blocked blocked.example" })
+        #expect(popup.isShowingBlockedPage)
+
+        let asked = scheme.requested.count
+        for attack in ["w.location = 'pob:load-anyway'; true", "document.querySelector('a').click(); true"] {
+            _ = try await opener.webView.evaluateJavaScript(attack)
+            try await Task.sleep(for: .milliseconds(100))
+            #expect(popup.unblockedHost == nil, "\(attack)")
+            #expect(popup.title == "pob blocked blocked.example", "\(attack)")
+            #expect(scheme.requested.count == asked, "\(attack)")
+        }
+    }
     /// Once the site's switch is used it decides, so switching blocking back on blocks the page again.
     @Test func theSiteSwitchTakesOverFromLoadAnyway() async throws {
         let blocker = try blocker(bundled: listFolder("||blocked.example^"))
