@@ -2,17 +2,24 @@ import Foundation
 
 /// The pages pob shows in place of a page it couldn't show. They carry no scripts, and every value is escaped.
 enum ErrorPage {
+    /// The blocked page's one link. `Tab` acts on it only while that page is showing.
+    static let loadAnywayAddress = "pob:load-anyway"
+
     static func html(for url: URL, error: Error) -> String {
-        let shown = escape(url.host() ?? url.absoluteString)
-        return page(
-            title: "Can't open \(shown)",
+        page(
+            title: "Can't open \(shown(url))",
             detail: escape((error as NSError).localizedDescription),
-            retry: url
+            link: retryLink(url)
         )
     }
 
     static func crashHTML(for url: URL?) -> String {
-        page(title: "This page stopped responding", detail: "Its process crashed twice in a row.", retry: url, label: "Reload")
+        page(title: "This page stopped responding", detail: "Its process crashed twice in a row.", link: retryLink(url), label: "Reload")
+    }
+
+    /// No Retry, because the rules would only block it again.
+    static func blockedHTML(for url: URL) -> String {
+        page(title: "pob blocked \(shown(url))", detail: "It's on the ad blocker's lists.", link: loadAnywayAddress, label: "Load anyway")
     }
 
     /// Cancelled loads are the user's own doing, and WebKit's "frame load interrupted" is how a download starts.
@@ -29,11 +36,17 @@ enum ErrorPage {
             .replacing("\"", with: "&quot;").replacing("'", with: "&#39;")
     }
 
-    private static func page(title: String, detail: String, retry: URL?, label: String = "Retry") -> String {
-        var link = ""
-        if let retry, ["http", "https", "file"].contains(retry.scheme) {
-            link = "<p><a href=\"\(escape(retry.absoluteString))\">\(label)</a></p>"
-        }
+    private static func shown(_ url: URL) -> String {
+        escape(url.host() ?? url.absoluteString)
+    }
+
+    private static func retryLink(_ url: URL?) -> String? {
+        guard let url, ["http", "https", "file"].contains(url.scheme) else { return nil }
+        return url.absoluteString
+    }
+
+    private static func page(title: String, detail: String, link: String?, label: String = "Retry") -> String {
+        let link = link.map { "<p><a href=\"\(escape($0))\">\(label)</a></p>" } ?? ""
         return """
         <!doctype html><meta charset="utf-8"><meta name="color-scheme" content="light dark">
         <title>\(title)</title>

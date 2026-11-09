@@ -596,10 +596,17 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
     }
 
     private func showAppearancePopover() {
-        let popover = AppearancePopover(model: appearance) { [weak self] in
-            self?.openPopover?.close()
-            self?.onOpenSettings?()
-        }
+        let host = tab?.webView.url?.host()
+        let popover = AppearancePopover(
+            model: appearance,
+            site: host,
+            isBlocking: host.map { tab?.profile.siteSettings[$0].adBlockerOff != true } ?? true,
+            onToggleBlocking: { [weak self] in self?.perform(.toggleSiteBlocking) },
+            onOpenSettings: { [weak self] in
+                self?.openPopover?.close()
+                self?.onOpenSettings?()
+            }
+        )
         showPopover(popover, from: rail.settingsButton)
     }
 

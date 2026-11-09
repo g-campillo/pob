@@ -1,17 +1,26 @@
 import AppKit
 
-/// Transparency and blur sliders, and the way to Settings. Changes apply live over the page and save when you let go.
+/// Transparency and blur sliders, the site's ad block switch, and the way to Settings. Changes apply live over the page and save when you let go.
 final class AppearancePopover: NSViewController {
     let transparencySlider = NSSlider(value: 0, minValue: 0, maxValue: 80, target: nil, action: nil)
     let blurSlider = NSSlider(value: 0, minValue: 0, maxValue: 40, target: nil, action: nil)
+    /// Nil when the page has no host to switch.
+    let blockingCheckbox: NSButton?
 
     private let model: AppearanceModel
+    private let onToggleBlocking: () -> Void
     private let onOpenSettings: () -> Void
     private let transparencyValue = NSTextField(labelWithString: "")
     private let blurValue = NSTextField(labelWithString: "")
 
-    init(model: AppearanceModel, onOpenSettings: @escaping () -> Void = {}) {
+    init(
+        model: AppearanceModel, site: String? = nil, isBlocking: Bool = true,
+        onToggleBlocking: @escaping () -> Void = {}, onOpenSettings: @escaping () -> Void = {}
+    ) {
         self.model = model
+        blockingCheckbox = site.map { NSButton(checkboxWithTitle: "Block ads on \($0)", target: nil, action: nil) }
+        blockingCheckbox?.state = isBlocking ? .on : .off
+        self.onToggleBlocking = onToggleBlocking
         self.onOpenSettings = onOpenSettings
         super.init(nibName: nil, bundle: nil)
     }
@@ -39,10 +48,17 @@ final class AppearancePopover: NSViewController {
         grid.rowSpacing = 10
         grid.columnSpacing = 10
         grid.column(at: 2).width = 38
+        if let blockingCheckbox {
+            blockingCheckbox.target = self
+            blockingCheckbox.action = #selector(toggleBlocking)
+            let row = grid.addRow(with: [blockingCheckbox])
+            row.mergeCells(in: NSRange(location: 0, length: 3))
+            row.topPadding = 4
+        }
         let settingsButton = NSButton(title: "Settings…", target: self, action: #selector(openSettings))
-        grid.addRow(with: [settingsButton])
-        grid.row(at: 2).mergeCells(in: NSRange(location: 0, length: 3))
-        grid.row(at: 2).topPadding = 4
+        let settingsRow = grid.addRow(with: [settingsButton])
+        settingsRow.mergeCells(in: NSRange(location: 0, length: 3))
+        settingsRow.topPadding = 4
         grid.cell(for: settingsButton)?.xPlacement = .trailing
         grid.translatesAutoresizingMaskIntoConstraints = false
 
@@ -77,6 +93,11 @@ final class AppearancePopover: NSViewController {
         } catch {
             NSLog("pob could not save settings: \(error)")
         }
+    }
+
+    /// AppKit has already flipped the box.
+    @objc private func toggleBlocking() {
+        onToggleBlocking()
     }
 
     @objc private func openSettings() {

@@ -122,7 +122,7 @@ import Testing
         #expect(app.settingsWindow?.model.selectedProfileID == b.id)
 
         var opened = false
-        let popover = AppearancePopover(model: testAppearance()) { opened = true }
+        let popover = AppearancePopover(model: testAppearance(), onOpenSettings: { opened = true })
         popover.loadView()
         let button = try #require(popover.view.subviewsDeep.compactMap { $0 as? NSButton }.first { $0.title == "Settings…" })
         button.performClick(nil)

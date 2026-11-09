@@ -683,7 +683,7 @@ private nonisolated final class StubServer: URLProtocol {
         let (controller, tab, scheme) = try window(blockingWith: blocker, page: "<title>Real</title>")
         await finishLoading(tab) { tab.load(.url(URL(string: "pobtest://blocked.example/")!)) }
         #expect(tab.isShowingErrorPage)
-        #expect(await eventually { tab.title == "Can't open blocked.example" })
+        #expect(await eventually { tab.title == "pob blocked blocked.example" })
         #expect(tab.webView.url?.host() == "blocked.example")
         #expect(scheme.requested.isEmpty)
 
@@ -691,6 +691,94 @@ private nonisolated final class StubServer: URLProtocol {
         #expect(!tab.isShowingErrorPage)
         #expect(scheme.requested == ["/"])
         #expect(await eventually { tab.title == "Real" })
+    }
+
+    // MARK: Load anyway
+
+    /// The blocked page, with its link clicked.
+    func loadAnyway(_ tab: Tab) async {
+        await finishLoading(tab) { tab.load(.url(URL(string: "pobtest://blocked.example/")!)) }
+        await finishLoading(tab) { tab.webView.evaluateJavaScript("document.querySelector('a').click()", completionHandler: nil) }
+    }
+    @Test func loadAnywayOpensABlockedPageOnce() async throws {
+        let blocker = try blocker(bundled: listFolder("||blocked.example^"))
+        await blocker.prepare()
+        let (_, tab, scheme) = try window(blockingWith: blocker, page: "<title>Real</title>")
+        await finishLoading(tab) { tab.load(.url(URL(string: "pobtest://blocked.example/")!)) }
+        #expect(await eventually { tab.title == "pob blocked blocked.example" })
+        #expect(tab.isShowingBlockedPage)
+        await finishLoading(tab) { tab.webView.evaluateJavaScript("document.querySelector('a').click()", completionHandler: nil) }
+        #expect(await eventually { tab.title == "Real" })
+        #expect(!tab.isShowingBlockedPage)
+        #expect(tab.unblockedHost == "blocked.example")
+        #expect(scheme.requested == ["/"])
+        #expect(tab.profile.siteSettings["blocked.example"] == SiteSetting()) // nothing remembered
+    }
+    @Test func loadAnywayEndsWhenTheTabLeavesTheSite() async throws {
+        let blocker = try blocker(bundled: listFolder("||blocked.example^\n/blocked.png"))
+        await blocker.prepare()
+        let (_, tab, scheme) = try window(blockingWith: blocker, page: "<title>Real</title>")
+        await loadAnyway(tab)
+        #expect(try await askForBoth(in: tab, scheme)) // the page let through runs without the rules
+
+        let earlier = scheme.requested.count
+        await load(blockedAndAllowed, in: tab, at: "pobtest://other.example/")
+        #expect(tab.unblockedHost == nil)
+        #expect(scheme.requested.dropFirst(earlier).contains("allowed.png"))
+        #expect(!scheme.requested.dropFirst(earlier).contains("blocked.png"))
+
+        await finishLoading(tab) { tab.load(.url(URL(string: "pobtest://blocked.example/")!)) }
+        #expect(await eventually { tab.title == "pob blocked blocked.example" })
+        #expect(tab.isShowingBlockedPage)
+    }
+    /// The page it stays on is still the one let through, so a download link leaves its rules off.
+    @Test func aDownloadLinkLeavesAPageLetThroughAlone() async throws {
+        let blocker = try blocker(bundled: listFolder("||blocked.example^\n/blocked.png"))
+        await blocker.prepare()
+        let (_, tab, scheme) = try window(blockingWith: blocker, page: "<title>Real</title>")
+        await loadAnyway(tab)
+        let file = URL(string: "https://elsewhere.example/report.pdf")!
+        tab.webView(tab.webView, decidePolicyFor: FakeNavigationAction(url: file, type: .linkActivated, modifiers: [], target: FakeMainFrame())) { _ in }
+        tab.webView(tab.webView, decidePolicyFor: FakeAttachment(url: file)) { #expect($0 == .download) }
+        #expect(try await askForBoth(in: tab, scheme))
+    }
+    @Test func aPageCantUseTheLinkItself() async throws {
+        let blocker = try blocker(bundled: listFolder("/blocked.png"))
+        await blocker.prepare()
+        let (_, tab, scheme) = try window(blockingWith: blocker, page: "<a href='pob:load-anyway'>Load anyway</a>")
+        var offered = false
+        tab.appToOpen = { _ in
+            offered = true
+            return nil
+        }
+        await open(tab)
+        let loads = scheme.requested.count
+        var loaded = false
+        tab.onLoadFinished = { loaded = true }
+        _ = try await tab.webView.evaluateJavaScript("document.querySelector('a').click(); true")
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(!loaded)
+        #expect(!offered)
+        #expect(scheme.requested.count == loads)
+        #expect(tab.unblockedHost == nil)
+        #expect(try await !askForBoth(in: tab, scheme))
+    }
+    /// Once the site's switch is used it decides, so switching blocking back on blocks the page again.
+    @Test func theSiteSwitchTakesOverFromLoadAnyway() async throws {
+        let blocker = try blocker(bundled: listFolder("||blocked.example^"))
+        await blocker.prepare()
+        let (controller, tab, _) = try window(blockingWith: blocker, page: "<title>Real</title>")
+        await loadAnyway(tab)
+        await finishLoading(tab) { controller.perform(.toggleSiteBlocking) }
+        #expect(tab.profile.siteSettings["blocked.example"].adBlockerOff == true)
+        #expect(await eventually { tab.title == "Real" })
+        await finishLoading(tab) { controller.perform(.toggleSiteBlocking) }
+        #expect(await eventually { tab.title == "pob blocked blocked.example" })
+        #expect(tab.isShowingBlockedPage)
+    }
+    @Test func otherErrorsKeepTheirRetry() {
+        #expect(ErrorPage.html(for: URL(string: "https://x.example/")!, error: URLError(.timedOut)).contains(">Retry<"))
+        #expect(!ErrorPage.blockedHTML(for: URL(string: "https://x.example/")!).contains("Retry"))
     }
 
     // MARK: The command

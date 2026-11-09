@@ -38,4 +38,19 @@ import Testing
         popover.viewWillDisappear()
         #expect(store.load().blur == 30)
     }
+    @Test func thePopoverShowsTheSiteSwitch() {
+        var toggled = 0
+        let popover = AppearancePopover(model: testAppearance(), site: "x.example", isBlocking: true, onToggleBlocking: { toggled += 1 })
+        popover.loadView()
+        #expect(popover.blockingCheckbox?.title == "Block ads on x.example")
+        #expect(popover.blockingCheckbox?.state == .on)
+        popover.blockingCheckbox?.performClick(nil)
+        #expect(toggled == 1)
+        #expect(popover.blockingCheckbox?.state == .off)
+    }
+    @Test func aPageWithNoHostHasNoSwitch() {
+        let popover = AppearancePopover(model: testAppearance())
+        popover.loadView()
+        #expect(popover.blockingCheckbox == nil)
+    }
 }

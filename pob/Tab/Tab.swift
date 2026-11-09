@@ -18,9 +18,14 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
 
     /// True from the moment an error or crash page loads until the next real page commits, so history and favicons skip it.
     private(set) var isShowingErrorPage = false
+    /// The error page is the one for a page the rules blocked, so its Load anyway link works.
+    private(set) var isShowingBlockedPage = false
+    /// Load anyway let this host through. The rules stay off for it until the tab's page leaves it, and nothing is remembered.
+    private(set) var unblockedHost: String?
 
     private var observations: [NSKeyValueObservation] = []
     private var errorNavigation: WKNavigation?
+    private var blockedNavigation: WKNavigation?
     /// Tests answer the alerts through this, because a sheet needs a window on screen.
     var alertSeam: ((NSAlert) -> NSApplication.ModalResponse)?
     /// Replaceable so tests don't depend on this Mac's camera, microphone and location settings.
@@ -173,7 +178,14 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
         decisionHandler: @escaping @MainActor (WKNavigationActionPolicy) -> Void
     ) {
         arrivedByHistory = navigationAction.navigationType == .backForward
-        if let link = linkForAnotherApp(navigationAction) {
+        if navigationAction.request.url?.absoluteString == ErrorPage.loadAnywayAddress {
+            // Before the other-app check, which would offer it to an app. Any page can link here, so only the blocked page's own link counts.
+            decisionHandler(.cancel)
+            if isShowingBlockedPage, let url = webView.url, let host = url.host() {
+                unblockedHost = host
+                webView.load(URLRequest(url: url))
+            }
+        } else if let link = linkForAnotherApp(navigationAction) {
             decisionHandler(.cancel)
             offerToOpen(link)
         } else if navigationAction.navigationType == .linkActivated, navigationAction.modifierFlags.contains(.command) {
@@ -197,7 +209,11 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
     /// Before the load goes ahead, so the page's first request already follows it. A restored page comes through here too.
     private func applyBlocking(for url: URL?) {
         let controller = webView.configuration.userContentController
-        if let host = url?.host(), profile.siteSettings[host].adBlockerOff == true {
+        let host = url?.host()
+        if let host, profile.siteSettings[host].adBlockerOff == true {
+            if host == unblockedHost { unblockedHost = nil } // the site's switch takes over, so switching it back on blocks the page again
+            profile.contentBlocker.detach(controller)
+        } else if let host, host == unblockedHost {
             profile.contentBlocker.detach(controller)
         } else {
             profile.contentBlocker.attach(controller)
@@ -243,6 +259,9 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
             errorItems.removeAll { $0 === item } // the entry holds a real page now
             isShowingErrorPage = false
         }
+        isShowingBlockedPage = navigation != nil && navigation === blockedNavigation
+        // Here and not in the policy call, because a link that turns out to be a download leaves the page where it is.
+        if webView.url?.host() != unblockedHost { unblockedHost = nil }
         if retryURL != webView.url { retryURL = nil } // the tab moved on. A 401 body commits at the same address, so it keeps its retry
         refusedHosts = []
     }
@@ -257,9 +276,14 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
     }
 
     private func showErrorPage(for error: Error) {
-        guard ErrorPage.shouldShow(error),
-              let url = (error as NSError).userInfo[NSURLErrorFailingURLErrorKey] as? URL else { return }
-        show(ErrorPage.html(for: url, error: error), at: url)
+        let error = error as NSError
+        guard ErrorPage.shouldShow(error), let url = error.userInfo[NSURLErrorFailingURLErrorKey] as? URL else { return }
+        if error.domain == "WebKitErrorDomain", error.code == 104 { // a content rule blocked the page itself
+            show(ErrorPage.blockedHTML(for: url), at: url)
+            blockedNavigation = errorNavigation // the flag goes up when this commits, so the page being replaced can't use the link
+        } else {
+            show(ErrorPage.html(for: url, error: error), at: url)
+        }
     }
 
     private func show(_ html: String, at url: URL?) {
