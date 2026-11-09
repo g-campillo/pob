@@ -3,10 +3,9 @@ import AppKit
 enum MainMenu {
     static func build(commands: CommandList) -> NSMenu {
         let menu = NSMenu()
-        addSubmenu("pob", to: menu, items: items(for: [.makeDefaultBrowser], in: commands) + [
-            .separator(),
-            NSMenuItem(title: "Quit pob", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"),
-        ])
+        let quit = NSMenuItem(title: "Quit pob", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        addSubmenu("pob", to: menu, items: items(for: [.openSettings], in: commands) + [.separator()]
+            + items(for: [.makeDefaultBrowser], in: commands) + [.separator(), quit])
         addSubmenu("File", to: menu, items: items(
             for: [.openSwitcher, .newWindow, .newPrivateWindow, .reopenTab, .closeTab, .closeWindow, .print],
             in: commands

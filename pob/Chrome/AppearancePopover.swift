@@ -1,16 +1,18 @@
 import AppKit
 
-/// Transparency and blur sliders. Changes apply live over the page and save when you let go.
+/// Transparency and blur sliders, and the way to Settings. Changes apply live over the page and save when you let go.
 final class AppearancePopover: NSViewController {
     let transparencySlider = NSSlider(value: 0, minValue: 0, maxValue: 80, target: nil, action: nil)
     let blurSlider = NSSlider(value: 0, minValue: 0, maxValue: 40, target: nil, action: nil)
 
     private let model: AppearanceModel
+    private let onOpenSettings: () -> Void
     private let transparencyValue = NSTextField(labelWithString: "")
     private let blurValue = NSTextField(labelWithString: "")
 
-    init(model: AppearanceModel) {
+    init(model: AppearanceModel, onOpenSettings: @escaping () -> Void = {}) {
         self.model = model
+        self.onOpenSettings = onOpenSettings
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -37,6 +39,11 @@ final class AppearancePopover: NSViewController {
         grid.rowSpacing = 10
         grid.columnSpacing = 10
         grid.column(at: 2).width = 38
+        let settingsButton = NSButton(title: "Settings…", target: self, action: #selector(openSettings))
+        grid.addRow(with: [settingsButton])
+        grid.row(at: 2).mergeCells(in: NSRange(location: 0, length: 3))
+        grid.row(at: 2).topPadding = 4
+        grid.cell(for: settingsButton)?.xPlacement = .trailing
         grid.translatesAutoresizingMaskIntoConstraints = false
 
         let container = NSView()
@@ -57,10 +64,10 @@ final class AppearancePopover: NSViewController {
     }
 
     func slidersChanged() {
-        model.settings = AppearanceSettings(
-            transparency: transparencySlider.doubleValue.rounded() / 100,
-            blur: Int(blurSlider.doubleValue.rounded())
-        )
+        var settings = model.settings // keeps the search engine
+        settings.transparency = transparencySlider.doubleValue.rounded() / 100
+        settings.blur = Int(blurSlider.doubleValue.rounded())
+        model.settings = settings
         updateValueLabels()
     }
 
@@ -70,6 +77,10 @@ final class AppearancePopover: NSViewController {
         } catch {
             NSLog("pob could not save settings: \(error)")
         }
+    }
+
+    @objc private func openSettings() {
+        onOpenSettings()
     }
 
     @objc private func sliderMoved() {

@@ -20,6 +20,15 @@ final class AppearanceModel {
         }
     }
 
+    /// Saved at once: no slider being let go of settles it later.
+    var searchEngine: SearchEngine {
+        get { storedSettings.searchEngine ?? .google }
+        set {
+            storedSettings.searchEngine = newValue
+            do { try persist() } catch { NSLog("pob could not save settings: \(error)") }
+        }
+    }
+
     var reduceTransparency: Bool {
         didSet { notify() }
     }

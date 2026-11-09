@@ -20,6 +20,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
     var onNewWindow: (() -> Void)?
     var onNewPrivateWindow: (() -> Void)?
     var onMakeDefaultBrowser: (() -> Void)?
+    var onOpenSettings: (() -> Void)?
     var profileChoices: () -> [ProfileInfo] = { [] }
     var onSwitchProfile: ((UUID) -> Void)?
 
@@ -94,7 +95,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         rail.update(profileName: name, isPrivate: tabs.profile.isPrivate)
     }
 
-    /// What the rail's profile button pops up. A private window has no other profile to go to.
+    /// What the rail's profile button pops up. A private window has no other profile to go to, but can manage its parent.
     func profileMenu() -> NSMenu {
         let menu = NSMenu()
         if !tabs.profile.isPrivate {
@@ -110,7 +111,15 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         if let command = commands.command(.newPrivateWindow) {
             menu.addItem(MainMenu.menuItem(for: command))
         }
+        menu.addItem(.separator())
+        let manage = NSMenuItem(title: "Manage Profiles…", action: #selector(manageProfiles), keyEquivalent: "")
+        manage.target = self
+        menu.addItem(manage)
         return menu
+    }
+
+    @objc private func manageProfiles() {
+        onOpenSettings?()
     }
 
     @objc private func profileChosen(_ sender: NSMenuItem) {
@@ -189,6 +198,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         case .newWindow: onNewWindow?()
         case .newPrivateWindow: onNewPrivateWindow?()
         case .makeDefaultBrowser: onMakeDefaultBrowser?() // the switcher and the address bar reach it from here
+        case .openSettings: onOpenSettings?()
         case .screenRecordingSettings: openURL(Permissions.screenRecordingSettingsURL)
         case .resetSitePermissions:
             guard let tab, let host = tab.webView.url?.host() else { return }
@@ -374,7 +384,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         }
         rail.onSubmit = { [weak self] text in
             guard let self else { return }
-            if let input = AddressInput.classify(text) {
+            if let input = AddressInput.classify(text, engine: appearance.searchEngine) {
                 navigate(input)
             }
             leaveAddressField()
@@ -491,7 +501,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
     }
 
     private func rows(for query: String, history: [HistoryEntry]) -> [SwitcherRow] {
-        SwitcherModel.rows(query: query, tabs: tabs.list.records, bookmarks: tabs.profile.bookmarks.all, history: history, commands: commands.all)
+        SwitcherModel.rows(query: query, tabs: tabs.list.records, bookmarks: tabs.profile.bookmarks.all, history: history, commands: commands.all, engine: appearance.searchEngine)
     }
 
     private func connectTabs() {
@@ -586,7 +596,11 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
     }
 
     private func showAppearancePopover() {
-        showPopover(AppearancePopover(model: appearance), from: rail.settingsButton)
+        let popover = AppearancePopover(model: appearance) { [weak self] in
+            self?.openPopover?.close()
+            self?.onOpenSettings?()
+        }
+        showPopover(popover, from: rail.settingsButton)
     }
 
     private func showDownloadsPopover() {

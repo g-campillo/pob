@@ -6,7 +6,7 @@ enum CommandID: String, CaseIterable {
     case openSwitcher, openSwitcherFromPage, newWindow, newPrivateWindow, reopenTab, closeTab, closeWindow, nextTab, previousTab
     case selectTab1, selectTab2, selectTab3, selectTab4, selectTab5, selectTab6, selectTab7, selectTab8, selectTab9
     case find, print, zoomIn, zoomOut, actualSize
-    case screenRecordingSettings, resetSitePermissions, toggleSiteBlocking, makeDefaultBrowser
+    case screenRecordingSettings, resetSitePermissions, toggleSiteBlocking, makeDefaultBrowser, openSettings
 }
 
 struct Command {
@@ -66,6 +66,7 @@ struct CommandList {
             command(.resetSitePermissions, "Reset Permissions for This Site"),
             command(.toggleSiteBlocking, "Toggle Ad Blocking for This Site"),
             command(.makeDefaultBrowser, "Make pob the Default Browser"),
+            command(.openSettings, "Settings…", key: ",", modifiers: .command),
             command(.selectTab1, "Select Tab 1", key: "1", modifiers: .command, reserved: true),
             command(.selectTab2, "Select Tab 2", key: "2", modifiers: .command, reserved: true),
             command(.selectTab3, "Select Tab 3", key: "3", modifiers: .command, reserved: true),

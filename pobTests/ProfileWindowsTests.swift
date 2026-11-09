@@ -148,7 +148,7 @@ import Testing
     @Test func aPrivateWindowOffersNoProfileAndNeverSwitches() async {
         let (app, a, _) = app()
         app.openWindow(restoring: nil, in: .makePrivate(from: a))
-        #expect(app.windows[0].profileMenu().items.map(\.title) == ["New Private Window"])
+        #expect(app.windows[0].profileMenu().items.filter { !$0.isSeparatorItem }.map(\.title) == ["New Private Window", "Manage Profiles…"])
         await app.switchProfile(of: app.windows[0], to: bID(app))
         #expect(app.windows.count == 1 && app.windows[0].tabs.profile.isPrivate)
     }

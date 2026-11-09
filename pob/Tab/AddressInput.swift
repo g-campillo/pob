@@ -9,10 +9,10 @@ enum AddressInput: Equatable {
     /// Query text keeps only characters that can't change how the URL parses.
     private static let queryAllowed = CharacterSet.urlQueryAllowed.subtracting(CharacterSet(charactersIn: "&=+:;?#/,@$"))
 
-    static func classify(_ text: String) -> AddressInput? {
+    static func classify(_ text: String, engine: SearchEngine = .google) -> AddressInput? {
         let input = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !input.isEmpty else { return nil }
-        guard input.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else { return search(input) }
+        guard input.rangeOfCharacter(from: .whitespacesAndNewlines) == nil else { return search(input, engine) }
 
         let lowercased = input.lowercased()
         if passthroughPrefixes.contains(where: lowercased.hasPrefix), let url = URL(string: input) {
@@ -21,12 +21,11 @@ enum AddressInput: Equatable {
         if let scheme = impliedScheme(for: input), let url = URL(string: "\(scheme)://\(input)") {
             return .url(url)
         }
-        return search(input)
+        return search(input, engine)
     }
 
-    private static func search(_ text: String) -> AddressInput {
-        let query = text.addingPercentEncoding(withAllowedCharacters: queryAllowed) ?? ""
-        return .search(URL(string: "https://www.google.com/search?q=\(query)")!)
+    private static func search(_ text: String, _ engine: SearchEngine) -> AddressInput {
+        .search(engine.url(for: text.addingPercentEncoding(withAllowedCharacters: queryAllowed) ?? ""))
     }
 
     /// The scheme a bare host should get, or nil when the text isn't a host.

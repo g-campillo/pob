@@ -18,7 +18,7 @@ enum SwitcherModel {
     /// Pages already listed drop out of History, so the store is asked for enough to fill the section anyway.
     static let historySearchLimit = tabLimit + bookmarkLimit + historyLimit
 
-    static func rows(query: String, tabs: [TabRecord], bookmarks: [Bookmark], history: [HistoryEntry], commands: [Command]) -> [SwitcherRow] {
+    static func rows(query: String, tabs: [TabRecord], bookmarks: [Bookmark], history: [HistoryEntry], commands: [Command], engine: SearchEngine = .google) -> [SwitcherRow] {
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
         func matches(_ candidate: String) -> Bool { candidate.localizedCaseInsensitiveContains(text) }
 
@@ -28,7 +28,7 @@ enum SwitcherModel {
         var rows = shownTabs.map {
             SwitcherRow(target: .tab($0.id), title: TabListView.displayTitle(for: $0), subtitle: $0.url?.absoluteString ?? "", section: "Tabs")
         }
-        guard let input = AddressInput.classify(text) else { return rows }
+        guard let input = AddressInput.classify(text, engine: engine) else { return rows }
 
         // Each page shows once, in the first section that has it: Return should find an open tab before opening it again.
         var listed = Set(shownTabs.compactMap(\.url))
@@ -48,7 +48,7 @@ enum SwitcherModel {
         }
         // Above the commands, because Return takes the top row: a wrong search is harmless, and a wrong command acts on the page.
         if case .search = input {
-            rows.append(SwitcherRow(target: .address(input), title: text, subtitle: "Search Google", section: ""))
+            rows.append(SwitcherRow(target: .address(input), title: text, subtitle: "Search \(engine.name)", section: ""))
         }
         rows += commands.filter { matches($0.title) }.prefix(commandLimit).map {
             SwitcherRow(target: .command($0.id), title: $0.title, subtitle: "", section: "Commands")

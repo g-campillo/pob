@@ -7,6 +7,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     private(set) var windows: [WindowController] = []
+    private(set) var settingsWindow: SettingsWindowController?
     /// The list, `profile` and `appearance` are set at launch, past the test-host check, so a test run can't reach the
     /// real profiles. Tests set their own.
     var profiles: ProfileList? {
@@ -156,8 +157,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             return
         }
         if windows.isEmpty { openWindow(restoring: nil) }
-        let target = controller(of: keyWindow) ?? NSApp.orderedWindows.lazy.compactMap(controller(of:)).first ?? windows.last
-        guard let target else { return }
+        guard let target = controller(of: keyWindow) ?? frontController else { return }
         links.forEach(target.openLink)
         if !Self.isRunningTests {
             target.window?.makeKeyAndOrderFront(nil)
@@ -214,6 +214,7 @@ final class AppController: NSObject, NSApplicationDelegate {
                 profile.dropSpareTab() // with its cookies, which are in memory only
             }
         }
+        controller.onOpenSettings = { [weak self] in self?.openSettings(selecting: (profile.parent ?? profile).id) }
         controller.profileChoices = { [weak self] in self?.profiles?.all ?? [] }
         controller.onSwitchProfile = { [weak self, weak controller] id in
             guard let self, let controller else { return }
@@ -261,19 +262,52 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     /// Commands act on the key window. Anything else that's key keeps its keys, so "no window" means nothing is key
-    /// and no browser window is showing. A minimized one doesn't count, or ⌘N would do nothing.
+    /// and no browser window is showing. A minimized one doesn't count, or ⌘N would do nothing. Settings isn't a browser
+    /// window, so from there commands go to the front one, as if none were key, except that ⌘W closes Settings.
     func perform(_ id: CommandID, keyWindow: NSWindow?) {
+        let isSettingsKey = keyWindow != nil && keyWindow === settingsWindow?.window
         if id == .makeDefaultBrowser {
             Task { await makeDefaultBrowser(keyWindow: keyWindow) }
         } else if let controller = controller(of: keyWindow) {
             controller.perform(id)
-        } else if keyWindow == nil, !isShowingAWindow, [.openSwitcher, .openSwitcherFromPage, .newWindow, .newPrivateWindow].contains(id) {
+        } else if id == .openSettings {
+            openSettings()
+        } else if isSettingsKey, [.closeTab, .closeWindow].contains(id) {
+            settingsWindow?.close()
+        } else if isSettingsKey, let controller = frontController {
+            controller.perform(id)
+        } else if keyWindow == nil || isSettingsKey, !isShowingAWindow, [.openSwitcher, .openSwitcherFromPage, .newWindow, .newPrivateWindow].contains(id) {
             openWindow(restoring: nil, in: id == .newPrivateWindow ? profile.map(Profile.makePrivate(from:)) : nil)
+        }
+    }
+
+    /// Built once and kept, so it opens again as it was left. Like every hosted window, it stays off screen in a test run.
+    func openSettings(selecting profileID: UUID? = nil) {
+        guard let profiles, let appearance else { return }
+        if settingsWindow == nil {
+            let model = SettingsModel(profiles: profiles, appearance: appearance)
+            model.makeDefaultBrowser = { [weak self] in
+                guard let self else { return }
+                Task { await self.makeDefaultBrowser(keyWindow: self.settingsWindow?.window) }
+            }
+            settingsWindow = SettingsWindowController(model: model)
+        }
+        if let profileID {
+            settingsWindow?.model.selectedProfileID = profileID
+        }
+        if !Self.isRunningTests {
+            settingsWindow?.showWindow(nil)
+            NSApp.activate()
         }
     }
 
     private func controller(of window: NSWindow?) -> WindowController? {
         windows.first { $0.window === window }
+    }
+
+    /// The front browser window, else the last opened, because hosted windows aren't ordered.
+    private var frontController: WindowController? {
+        NSApp.orderedWindows.lazy.compactMap(controller(of:)).first ?? windows.last
     }
 
     /// Holds `self` until the save runs, because a snapshot taken after it was gone would be empty.
