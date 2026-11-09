@@ -3,7 +3,7 @@ import AppKit
 enum CommandID: String, CaseIterable {
     case toggleRail, focusAddress, reload, back, forward, snapOpaque
     case toggleInspector, showConsole, showPageSource, openInSafari, signIn, bookmarkPage
-    case openSwitcher, openSwitcherFromPage, newWindow, reopenTab, closeTab, closeWindow, nextTab, previousTab
+    case openSwitcher, openSwitcherFromPage, newWindow, newPrivateWindow, reopenTab, closeTab, closeWindow, nextTab, previousTab
     case selectTab1, selectTab2, selectTab3, selectTab4, selectTab5, selectTab6, selectTab7, selectTab8, selectTab9
     case find, print, zoomIn, zoomOut, actualSize
     case screenRecordingSettings, resetSitePermissions, toggleSiteBlocking, makeDefaultBrowser
@@ -51,6 +51,7 @@ struct CommandList {
             command(.openSwitcher, "New Tab", key: "t", modifiers: .command, reserved: true),
             command(.openSwitcherFromPage, "Open Switcher", key: "k", modifiers: .command),
             command(.newWindow, "New Window", key: "n", modifiers: .command, reserved: true),
+            command(.newPrivateWindow, "New Private Window", key: "n", modifiers: [.shift, .command], reserved: true),
             command(.reopenTab, "Reopen Closed Tab", key: "t", modifiers: [.shift, .command], reserved: true),
             command(.closeTab, "Close Tab", key: "w", modifiers: .command, reserved: true),
             command(.closeWindow, "Close Window", key: "w", modifiers: [.shift, .command], reserved: true),
@@ -92,10 +93,10 @@ struct CommandList {
     }
 
     /// True when the key is taken and goes no further. A repeat of these is taken and dropped: a held ⌘W would run
-    /// through the tabs and on into the next window, and a held ⌘N would open a window per repeat.
+    /// through the tabs and on into the next window, and a held ⌘N or ⇧⌘N would open a window per repeat.
     func performReserved(_ event: NSEvent) -> Bool {
         guard let command = reservedCommand(for: event) else { return false }
-        if !event.isARepeat || ![.closeTab, .closeWindow, .newWindow].contains(command.id) {
+        if !event.isARepeat || ![.closeTab, .closeWindow, .newWindow, .newPrivateWindow].contains(command.id) {
             command.perform()
         }
         return true

@@ -620,7 +620,7 @@ private final class Reached {
         let plain = WindowController(appearance: try #require(app.appearance), tabs: TabManager(profile: .temporary(), keepsSpare: false))
         #expect(app.windows[0].window?.frame == plain.window?.frame)
     }
-    @Test(arguments: [CommandID.openSwitcher, .openSwitcherFromPage, .newWindow])
+    @Test(arguments: [CommandID.openSwitcher, .openSwitcherFromPage, .newWindow, .newPrivateWindow])
     func withNoWindowTheseOpenOne(command: CommandID) {
         let app = makeApp()
         app.perform(command, keyWindow: nil)
@@ -629,7 +629,7 @@ private final class Reached {
     }
     @Test func withNoWindowOtherCommandsDoNothing() {
         let app = makeApp()
-        for command in CommandID.allCases where ![.openSwitcher, .openSwitcherFromPage, .newWindow].contains(command) {
+        for command in CommandID.allCases where ![.openSwitcher, .openSwitcherFromPage, .newWindow, .newPrivateWindow].contains(command) {
             app.perform(command, keyWindow: nil)
         }
         #expect(app.windows.isEmpty)

@@ -21,6 +21,7 @@ final class Rail: NSView, NSTextFieldDelegate {
     let tabList = TabListView()
     let suggestions = SwitcherList(selectsFirstRow: false)
     let pinned = PinnedBookmarksView()
+    let profileButton = NSButton(title: "", target: nil, action: nil)
     private(set) lazy var settingsButton = iconButton("gearshape", label: "Settings", action: #selector(settingsPressed))
 
     private(set) lazy var downloadsButton = iconButton("arrow.down.circle", label: "Downloads", action: #selector(downloadsPressed))
@@ -49,6 +50,15 @@ final class Rail: NSView, NSTextFieldDelegate {
     func update(pinned bookmarks: [Bookmark], favicons: FaviconStore) {
         pinned.update(bookmarks: bookmarks, favicons: favicons)
         pinned.isHidden = bookmarks.isEmpty // a hidden row takes no space in the stack
+    }
+
+    /// A private window has no other profile to go to, so its button does nothing.
+    func update(profileName: String, isPrivate: Bool) {
+        let name = isPrivate ? "Private" : profileName
+        profileButton.title = name
+        profileButton.image = NSImage(systemSymbolName: isPrivate ? "eye.slash" : "person.crop.circle", accessibilityDescription: nil)
+        profileButton.isEnabled = !isPrivate
+        profileButton.setAccessibilityLabel("Profile: \(name)")
     }
 
     /// Rows replace the tab list. With none, the tab list comes back.
@@ -144,7 +154,12 @@ final class Rail: NSView, NSTextFieldDelegate {
 
         let bottomSpacer = NSView()
         bottomSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let bottomRow = NSStackView(views: [bottomSpacer, downloadsButton, settingsButton])
+        profileButton.isBordered = false
+        profileButton.imagePosition = .imageLeading
+        profileButton.lineBreakMode = .byTruncatingTail
+        profileButton.setContentHuggingPriority(.defaultHigh, for: .horizontal)
+        profileButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal) // a long name gives way to the icons
+        let bottomRow = NSStackView(views: [profileButton, bottomSpacer, downloadsButton, settingsButton])
         bottomRow.orientation = .horizontal
 
         pinned.translatesAutoresizingMaskIntoConstraints = false

@@ -165,7 +165,7 @@ private final class HeldHistory {
         let switcher = controller.switcher
         #expect(switcher.bounds.height == window.minSize.height)
         controller.perform(.openSwitcher)
-        try type("new", into: switcher.field) // five tabs, two commands and the search row
+        try type("new", into: switcher.field) // five tabs, three commands and the search row
         switcher.layoutSubtreeIfNeeded()
         let glass = try #require(switcher.subviewsDeep.first { $0 is NSGlassEffectView })
         let panel = glass.convert(glass.bounds, to: switcher)

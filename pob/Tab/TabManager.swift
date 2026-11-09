@@ -112,7 +112,7 @@ final class TabManager {
                 record.title = tab.title.isEmpty ? record.title : tab.title
             }
             onChange?()
-            if !tab.isShowingErrorPage, let url = tab.webView.url, Self.isRecordable(url), !tab.title.isEmpty, recordedTitles[id] != tab.title {
+            if !tab.isShowingErrorPage, let url = tab.webView.url, isRecordable(url), !tab.title.isEmpty, recordedTitles[id] != tab.title {
                 recordedTitles[id] = tab.title
                 Task { [history = profile.history, title = tab.title] in await history.updateTitle(url: url, title: title) }
             }
@@ -151,15 +151,16 @@ final class TabManager {
         }
     }
 
-    private static func isRecordable(_ url: URL) -> Bool { url.scheme == "http" || url.scheme == "https" }
+    /// A private window leaves no history and no icons, so nothing it shows is recorded.
+    private func isRecordable(_ url: URL) -> Bool { !profile.isPrivate && (url.scheme == "http" || url.scheme == "https") }
 
     private func recordVisit(of tab: Tab) {
-        guard let url = tab.webView.url, Self.isRecordable(url) else { return }
+        guard let url = tab.webView.url, isRecordable(url) else { return }
         Task { [history = profile.history, title = tab.title] in await history.record(url: url, title: title) }
     }
 
     private func refreshFavicon(of tab: Tab) {
-        guard let url = tab.webView.url, Self.isRecordable(url), let host = url.host() else { return }
+        guard let url = tab.webView.url, isRecordable(url), let host = url.host() else { return }
         Task { [weak self, weak tab] in
             guard let self, let webView = tab?.webView else { return }
             await updateFavicon(profile.favicons, host, webView)

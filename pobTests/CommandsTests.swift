@@ -31,7 +31,7 @@ import Testing
     }
     @Test func onlyAlwaysReachShortcutsAreReserved() {
         #expect(Set(list.all.filter(\.isReserved).map(\.id)) == [
-            .focusAddress, .openSwitcher, .newWindow, .reopenTab, .closeTab, .closeWindow, .nextTab, .previousTab,
+            .focusAddress, .openSwitcher, .newWindow, .newPrivateWindow, .reopenTab, .closeTab, .closeWindow, .nextTab, .previousTab,
             .selectTab1, .selectTab2, .selectTab3, .selectTab4, .selectTab5, .selectTab6, .selectTab7, .selectTab8, .selectTab9,
         ])
     }
@@ -58,7 +58,7 @@ import Testing
     }
     @Test func fileMenuHoldsTabAndWindowCommands() {
         let file = MainMenu.build(commands: list).item(withTitle: "File")?.submenu
-        #expect(file?.items.map(\.title) == ["New Tab", "New Window", "Reopen Closed Tab", "Close Tab", "Close Window", "Print…"])
+        #expect(file?.items.map(\.title) == ["New Tab", "New Window", "New Private Window", "Reopen Closed Tab", "Close Tab", "Close Window", "Print…"])
     }
     /// A shortcut that isn't reserved can only fire from the menu bar, once the page has passed on it.
     @Test func everyPageFirstShortcutIsInTheMenu() {
@@ -93,6 +93,18 @@ import Testing
             }
             #expect(received == [id], "\(id)")
         }
+    }
+    @Test func newPrivateWindowIsReservedAndARepeatDoesNothing() throws {
+        var received: [CommandID] = []
+        let recording = CommandList.standard { received.append($0) }
+        let command = try #require(recording.command(.newPrivateWindow))
+        #expect(command.title == "New Private Window")
+        #expect(command.key == "n" && command.modifiers == [.shift, .command] && command.isReserved)
+        #expect(recording.performReserved(keyDown("N", keyCode: 45, [.shift, .command])))
+        #expect(recording.performReserved(keyDown("N", keyCode: 45, [.shift, .command], isARepeat: true)))
+        #expect(received == [.newPrivateWindow])
+        let item = MainMenu.build(commands: list).item(withTitle: "File")?.submenu?.item(withTitle: "New Private Window")
+        #expect(item?.keyEquivalent == "n" && item?.keyEquivalentModifierMask == [.shift, .command])
     }
     @Test func otherReservedKeysKeepRepeating() {
         var received: [CommandID] = []

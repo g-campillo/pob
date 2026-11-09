@@ -8,7 +8,7 @@ enum MainMenu {
             NSMenuItem(title: "Quit pob", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"),
         ])
         addSubmenu("File", to: menu, items: items(
-            for: [.openSwitcher, .newWindow, .reopenTab, .closeTab, .closeWindow, .print],
+            for: [.openSwitcher, .newWindow, .newPrivateWindow, .reopenTab, .closeTab, .closeWindow, .print],
             in: commands
         ))
         addSubmenu("Edit", to: menu, items: editItems() + [.separator()] + items(for: [.find], in: commands))

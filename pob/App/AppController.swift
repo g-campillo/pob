@@ -89,9 +89,9 @@ final class AppController: NSObject, NSApplicationDelegate {
         saveAllSessions()
     }
 
-    /// Returns with every session on disk, so it's safe to call at quit.
+    /// Returns with every session on disk, so it's safe to call at quit. A private window is never saved.
     func saveAllSessions() {
-        for profile in preparedProfiles {
+        for profile in preparedProfiles where !profile.isPrivate {
             profile.session.save(sessionSnapshot(of: profile))
         }
     }
@@ -185,13 +185,24 @@ final class AppController: NSObject, NSApplicationDelegate {
         controller.onNewWindow = { [weak self, weak controller] in
             self?.openWindow(restoring: nil, in: profile, cascadingFrom: controller?.window)
         }
+        controller.onNewPrivateWindow = { [weak self, weak controller] in
+            self?.openWindow(restoring: nil, in: .makePrivate(from: profile), cascadingFrom: controller?.window)
+        }
         controller.onMakeDefaultBrowser = { [weak self, weak controller] in
             guard let self else { return }
             Task { await self.makeDefaultBrowser(keyWindow: controller?.window) }
         }
         controller.onClose = { [weak self, weak controller] in
-            self?.windows.removeAll { $0 === controller }
-            self?.saveSessionSoon(profile)
+            guard let self else { return }
+            windows.removeAll { $0 === controller }
+            saveSessionSoon(profile)
+            if profile.isPrivate, !windows.contains(where: { $0.tabs.profile === profile }) {
+                try? FileManager.default.removeItem(at: profile.directory)
+                preparedProfiles.removeAll { $0 === profile }
+            }
+        }
+        if let name = profiles?.name(of: profile.id) {
+            controller.showProfile(name: name)
         }
         windows.append(controller)
 
@@ -212,8 +223,8 @@ final class AppController: NSObject, NSApplicationDelegate {
             Task { await makeDefaultBrowser(keyWindow: keyWindow) }
         } else if let controller = controller(of: keyWindow) {
             controller.perform(id)
-        } else if keyWindow == nil, !isShowingAWindow, [.openSwitcher, .openSwitcherFromPage, .newWindow].contains(id) {
-            openWindow(restoring: nil)
+        } else if keyWindow == nil, !isShowingAWindow, [.openSwitcher, .openSwitcherFromPage, .newWindow, .newPrivateWindow].contains(id) {
+            openWindow(restoring: nil, in: id == .newPrivateWindow ? profile.map(Profile.makePrivate(from:)) : nil)
         }
     }
 
@@ -223,6 +234,7 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     /// Holds `self` until the save runs, because a snapshot taken after it was gone would be empty.
     private func saveSessionSoon(_ profile: Profile) {
+        guard !profile.isPrivate else { return }
         profile.session.saveSoon { self.sessionSnapshot(of: profile) }
     }
 
@@ -239,7 +251,9 @@ final class AppController: NSObject, NSApplicationDelegate {
             guard let self else { return nil }
             return (controller(of: NSApp.keyWindow) ?? NSApp.orderedWindows.lazy.compactMap(controller(of:)).first)?.window
         }
-        Task { await profile.history.prune(before: Date().addingTimeInterval(-365 * 86_400)) }
+        if !profile.isPrivate { // it keeps no history
+            Task { await profile.history.prune(before: Date().addingTimeInterval(-365 * 86_400)) }
+        }
     }
 
     private func observeDisplayOptions(_ appearance: AppearanceModel) {

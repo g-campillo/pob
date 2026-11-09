@@ -18,6 +18,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
     var onClose: (() -> Void)?
     /// `AppController` owns the windows, and the switcher's New Window row starts here.
     var onNewWindow: (() -> Void)?
+    var onNewPrivateWindow: (() -> Void)?
     var onMakeDefaultBrowser: (() -> Void)?
 
     private let appearance: AppearanceModel
@@ -37,7 +38,10 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
     init(appearance: AppearanceModel, tabs: TabManager) {
         self.appearance = appearance
         self.tabs = tabs
-        searchHistory = { [profile = tabs.profile] in await profile.history.search($0, limit: SwitcherModel.historySearchLimit) }
+        searchHistory = { [profile = tabs.profile] query in
+            guard !profile.isPrivate else { return [] } // a private window offers no history, not even its parent's
+            return await profile.history.search(query, limit: SwitcherModel.historySearchLimit)
+        }
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
@@ -63,6 +67,9 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         setWindowButtonsVisible(false)
         appearance.addObserver { [weak self] in self?.applyAppearance() }
         tabs.profile.bookmarks.addObserver { [weak self] in self?.updateRailContents() }
+        if tabs.profile.isPrivate { // it isn't in the profile list, so nothing else names it
+            showProfile(name: "Private")
+        }
         showActiveTab()
         applyAppearance()
     }
@@ -79,6 +86,10 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
             activeIndex: records.firstIndex { $0.id == tabs.list.activeID } ?? 0,
             frame: window.frameDescriptor
         )
+    }
+
+    func showProfile(name: String) {
+        rail.update(profileName: name, isPrivate: tabs.profile.isPrivate)
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -144,6 +155,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         case .zoomOut: tab?.zoomOut()
         case .actualSize: tab?.actualSize()
         case .newWindow: onNewWindow?()
+        case .newPrivateWindow: onNewPrivateWindow?()
         case .makeDefaultBrowser: onMakeDefaultBrowser?() // the switcher and the address bar reach it from here
         case .screenRecordingSettings: openURL(Permissions.screenRecordingSettingsURL)
         case .resetSitePermissions:

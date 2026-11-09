@@ -6,6 +6,9 @@ final class Profile {
     let id: UUID
     let directory: URL
     let isPersistent: Bool
+    /// The profile a private one was opened from. nil for every other profile.
+    let parent: Profile?
+    var isPrivate: Bool { parent != nil }
     /// Built on first use, because building it makes folders in the store, and a test reading `Profile.initial` mustn't.
     lazy var dataStore: WKWebsiteDataStore = isPersistent ? WKWebsiteDataStore(forIdentifier: id) : .nonPersistent()
 
@@ -70,19 +73,38 @@ final class Profile {
         )
     }
 
-    /// Private data store and a unique temp folder, for tests.
-    static func temporary() -> Profile {
-        let id = UUID()
-        let directory = FileManager.default.temporaryDirectory.appending(path: "pob-\(id.uuidString)", directoryHint: .isDirectory)
+    /// Private data store and a unique temp folder, for tests. A test that lists it passes the id it's listed under.
+    static func temporary(id: UUID = UUID()) -> Profile {
+        let directory = FileManager.default.temporaryDirectory.appending(path: "pob-\(UUID().uuidString)", directoryHint: .isDirectory)
         return Profile(id: id, directory: directory, isPersistent: false, faviconDirectory: directory.appending(path: "favicons", directoryHint: .isDirectory), downloadsDirectory: directory.appending(path: "Downloads", directoryHint: .isDirectory))
     }
 
-    private init(id: UUID, directory: URL, isPersistent: Bool, faviconDirectory: URL, downloadsDirectory: URL) {
+    /// Cookies in memory and a temporary folder that goes with its last window. It reads its parent's bookmarks, icons,
+    /// rules and downloads folder, and writes no history or icons. A private profile passed in hands over its own parent.
+    static func makePrivate(from parent: Profile) -> Profile {
+        let parent = parent.parent ?? parent
+        let id = UUID()
+        let profile = Profile(
+            id: id,
+            directory: FileManager.default.temporaryDirectory.appending(path: "pob-private-\(id.uuidString)", directoryHint: .isDirectory),
+            isPersistent: false,
+            faviconDirectory: parent.faviconDirectory,
+            downloadsDirectory: parent.downloadsDirectory,
+            parent: parent
+        )
+        profile.bookmarks = parent.bookmarks
+        profile.favicons = parent.favicons
+        profile.contentBlocker = parent.contentBlocker
+        return profile
+    }
+
+    private init(id: UUID, directory: URL, isPersistent: Bool, faviconDirectory: URL, downloadsDirectory: URL, parent: Profile? = nil) {
         self.faviconDirectory = faviconDirectory
         self.downloadsDirectory = downloadsDirectory
         self.id = id
         self.directory = directory
         self.isPersistent = isPersistent
+        self.parent = parent
     }
 
     func prepareSpareTab() {

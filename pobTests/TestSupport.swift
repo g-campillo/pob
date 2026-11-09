@@ -68,3 +68,8 @@ func wentModal(during body: () async throws -> Void) async rethrows -> Bool {
     try await body()
     return watch.sawModal
 }
+
+/// An `AppearanceModel` over a settings file of its own.
+func testAppearance() -> AppearanceModel {
+    AppearanceModel(store: SettingsStore(fileURL: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString + ".json")), reduceTransparency: false)
+}

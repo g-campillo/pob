@@ -4,13 +4,13 @@ import Testing
 @testable import pob
 
 @Suite struct ProfileWindowsTests {
-    /// An app with two temporary profiles, A first, so nothing touches the real folder.
+    /// An app with two temporary profiles, A first, so nothing touches the real folder. Each has the id it's listed under.
     func app() -> (AppController, a: Profile, b: Profile) {
-        let a = Profile.temporary(), b = Profile.temporary()
+        let a = Profile.temporary(id: Profile.initialID)
         let controller = AppController()
         let list = ProfileList(file: JSONFile(url: a.directory.appending(path: "profiles.json")))
-        let renamed = list.add(name: "B")
-        let profiles = [Profile.initialID: a, renamed.id: b]
+        let b = Profile.temporary(id: list.add(name: "B").id)
+        let profiles = [a.id: a, b.id: b]
         controller.profiles = list
         controller.makeProfile = { profiles[$0]! }
         controller.profile = a
