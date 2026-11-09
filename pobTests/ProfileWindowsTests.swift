@@ -144,6 +144,41 @@ import Testing
         #expect(asked == 1)
         #expect(app.windows[0].tabs.profile === a && a.parked == nil)
     }
+    /// The sheet waits on the user, and a window closed meanwhile has nothing left to switch.
+    @Test func aWindowClosedDuringTheSheetIsntSwitched() async {
+        let (app, a, _) = app()
+        app.openWindow(restoring: window("https://call.example/"), in: a)
+        app.windows[0].tabs.isCapturing = { _ in true }
+        app.confirmSwitch = { controller in
+            controller.window?.close()
+            return true
+        }
+        await app.switchProfile(of: app.windows[0], to: bID(app))
+        #expect(app.windows.isEmpty && a.parked == nil)
+    }
+    /// A switch into a profile that was deleted while the sheet was up would leave a window in a forgotten profile.
+    @Test func aSwitchConfirmedDuringADeleteStaysPut() async throws {
+        let (app, a, b) = app()
+        app.openWindow(restoring: window("https://call.example/"), in: a)
+        app.windows[0].tabs.isCapturing = { _ in true }
+        let (gate, release) = AsyncStream<Void>.makeStream()
+        var started = false
+        app.removeDataStore = { _ in
+            started = true
+            for await _ in gate {} // until it's released
+        }
+        var deletion: Task<Void, any Error>?
+        app.confirmSwitch = { [weak app] _ in
+            deletion = Task { try await app?.deleteProfile(b.id) }
+            _ = await eventually { started }
+            return true
+        }
+        await app.switchProfile(of: app.windows[0], to: b.id)
+        #expect(app.windows.count == 1 && app.windows[0].tabs.profile === a && a.parked == nil)
+        release.finish()
+        try await deletion?.value
+        #expect(app.profiles?.all.map(\.id) == [Profile.initialID])
+    }
     /// The sheet promises the call ends, which only holds if nothing keeps the old window's pages alive.
     @Test func aConfirmedSwitchReleasesTheOldWindowAndItsPages() async {
         let (app, a, _) = app()

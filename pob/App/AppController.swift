@@ -207,7 +207,7 @@ final class AppController: NSObject, NSApplicationDelegate {
 
     /// A window opened from another steps away from it. Exactly on top, it would look as if nothing had happened.
     func openWindow(restoring snapshot: WindowSnapshot?, in profile: Profile? = nil, cascadingFrom parent: NSWindow? = nil) {
-        guard let profile = profile ?? self.profile, let appearance else { return }
+        guard let profile = profile ?? profileForNewWindows, let appearance else { return }
         // With no window left in the profile nothing else would bring its parked tabs back. They open where a new window would.
         let unparked = snapshot == nil && !windows.contains { $0.tabs.profile === profile } ? profile.parked : nil
         if unparked != nil { profile.parked = nil }
@@ -245,7 +245,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             }
         }
         controller.onOpenSettings = { [weak self] in self?.openSettings(selecting: (profile.parent ?? profile).id) }
-        controller.profileChoices = { [weak self] in self?.profiles?.all ?? [] }
+        controller.profileChoices = { [weak self] in self?.choosableProfiles ?? [] }
         controller.onSwitchProfile = { [weak self, weak controller] id in
             guard let self, let controller else { return }
             Task { await self.switchProfile(of: controller, to: id) }
@@ -285,6 +285,8 @@ final class AppController: NSObject, NSApplicationDelegate {
         let old = controller.tabs.profile
         guard id != old.id, !old.isPrivate else { return }
         if controller.tabs.isCapturingAny, await !confirmSwitch(controller) { return }
+        // The sheet waits on the user, who can meanwhile close the window or delete the profile.
+        guard choosableProfiles.contains(where: { $0.id == id }), windows.contains(where: { $0 === controller }) else { return }
         if let snapshot = controller.snapshot {
             old.parked = old.parked?.appending(snapshot) ?? snapshot
         }
@@ -305,7 +307,22 @@ final class AppController: NSObject, NSApplicationDelegate {
     func canDeleteProfile(_ id: UUID) -> Bool {
         guard let profiles, !deletingProfiles.contains(id), profiles.all.count - deletingProfiles.count > 1,
               profiles.name(of: id) != nil else { return false }
-        return !windows.contains { $0.tabs.profile.id == id || $0.tabs.profile.parent?.id == id }
+        return !hasWindows(in: id)
+    }
+
+    private func hasWindows(in id: UUID) -> Bool {
+        windows.contains { $0.tabs.profile.id == id || $0.tabs.profile.parent?.id == id }
+    }
+
+    /// Listed and not being deleted: the profiles a window can go to.
+    private var choosableProfiles: [ProfileInfo] {
+        profiles?.all.filter { !deletingProfiles.contains($0.id) } ?? []
+    }
+
+    /// `profile`, or while that's being deleted, the first profile that isn't.
+    private var profileForNewWindows: Profile? {
+        guard let profile, deletingProfiles.contains(profile.id) else { return profile }
+        return choosableProfiles.first.map { makeProfile($0.id) }
     }
 
     /// The data store goes first, because it's the part that can refuse, and until it's gone nothing else is touched.
@@ -318,6 +335,8 @@ final class AppController: NSObject, NSApplicationDelegate {
         deleted.dropSpareTab()
         deleted.dropDataStore()
         try await removeDataStore(id)
+        // Nothing should open a window in it meanwhile, but one that did would have its tabs and bookmarks in the folder.
+        guard !hasWindows(in: id) else { throw ProfileInUse() }
         do {
             try FileManager.default.removeItem(at: deleted.directory)
         } catch CocoaError.fileNoSuchFile {
@@ -350,7 +369,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             bringForward(controller)
             controller.perform(id)
         } else if keyWindow == nil || isSettingsKey, !isShowingAWindow, [.openSwitcher, .openSwitcherFromPage, .newWindow, .newPrivateWindow].contains(id) {
-            openWindow(restoring: nil, in: id == .newPrivateWindow ? profile.map(Profile.makePrivate(from:)) : nil)
+            openWindow(restoring: nil, in: id == .newPrivateWindow ? profileForNewWindows.map(Profile.makePrivate(from:)) : nil)
         }
     }
 

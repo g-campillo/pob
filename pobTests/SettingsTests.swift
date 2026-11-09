@@ -258,6 +258,47 @@ import Testing
         #expect(FileManager.default.fileExists(atPath: b.directory.path()))
         #expect(model.deleting.isEmpty)
     }
+    /// A window that opens when nothing says where goes to the first profile, unless that's the one going.
+    @Test func newWindowsAvoidAProfileBeingDeleted() async throws {
+        let (app, _, b) = ProfileWindowsTests().app()
+        let (gate, release) = AsyncStream<Void>.makeStream()
+        var started = false
+        app.removeDataStore = { _ in
+            started = true
+            for await _ in gate {} // until it's released
+        }
+        let deletion = Task { try await app.deleteProfile(Profile.initialID) }
+        #expect(await eventually { started })
+        app.perform(.newWindow, keyWindow: nil)
+        app.perform(.newPrivateWindow, keyWindow: nil)
+        #expect(app.windows.map { ($0.tabs.profile.parent ?? $0.tabs.profile) === b } == [true, true])
+        #expect(app.windows[0].profileMenu().items.map(\.title).prefix(1) == ["B"]) // Main isn't offered
+        app.windows.forEach { $0.window?.close() }
+        _ = app.applicationShouldHandleReopen(NSApp, hasVisibleWindows: false) // the Dock
+        #expect(app.windows.count == 1 && app.windows[0].tabs.profile === b)
+        release.finish()
+        try await deletion.value
+        #expect(app.profiles?.all.map(\.id) == [b.id])
+    }
+    /// Nothing should open a window in a profile being deleted, but if something does, the folder under it stays.
+    @Test(arguments: [false, true])
+    func aWindowOpenedDuringADeleteKeepsTheProfile(isPrivate: Bool) async throws {
+        let (app, _, b) = ProfileWindowsTests().app()
+        try FileManager.default.createDirectory(at: b.directory, withIntermediateDirectories: true)
+        let (gate, release) = AsyncStream<Void>.makeStream()
+        var started = false
+        app.removeDataStore = { _ in
+            started = true
+            for await _ in gate {}
+        }
+        let deletion = Task { try await app.deleteProfile(b.id) }
+        #expect(await eventually { started })
+        app.openWindow(restoring: nil, in: isPrivate ? .makePrivate(from: b) : b)
+        release.finish()
+        await #expect(throws: ProfileInUse.self) { try await deletion.value }
+        #expect(FileManager.default.fileExists(atPath: b.directory.path()))
+        #expect(app.profiles?.all.count == 2)
+    }
     /// The test host has pob's bundle id, so the real removal would reach the user's own stores.
     @Test func aTestThatForgetsTheSeamRemovesNothing() async throws {
         let (app, _, b) = ProfileWindowsTests().app()
