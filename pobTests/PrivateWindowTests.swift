@@ -61,6 +61,23 @@ import Testing
         app.windows[0].window?.close()
         #expect(!FileManager.default.fileExists(atPath: profile.directory.path()))
     }
+    /// ⌘Q sends no window a close, so a private window can't rely on its folder being removed.
+    @Test func privateSiteSettingsStayInMemory() {
+        let hidden = Profile.makePrivate(from: .temporary())
+        hidden.siteSettings["x.example"].zoom = 1.5
+        #expect(hidden.siteSettings["x.example"].zoom == 1.5)
+        #expect(!FileManager.default.fileExists(atPath: hidden.directory.appending(path: "sites.json").path()))
+        #expect(!FileManager.default.fileExists(atPath: hidden.directory.path()))
+    }
+    /// Its cookies live in memory, so they go when it does.
+    @Test func aClosedPrivateProfileIsReleased() async {
+        let (app, a, _) = ProfileWindowsTests().app()
+        app.openWindow(restoring: nil, in: .makePrivate(from: a))
+        weak let profile = app.windows[0].tabs.profile
+        #expect(await eventually { profile?.spareTab != nil }) // the spare web view holds its profile
+        app.windows[0].window?.close()
+        #expect(await eventually { profile == nil })
+    }
     @Test func withNoWindowTheShortcutOpensAPrivateOne() {
         let (app, _, _) = ProfileWindowsTests().app()
         app.perform(.newPrivateWindow, keyWindow: nil)

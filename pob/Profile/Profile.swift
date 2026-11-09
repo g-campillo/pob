@@ -95,6 +95,7 @@ final class Profile {
         profile.bookmarks = parent.bookmarks
         profile.favicons = parent.favicons
         profile.contentBlocker = parent.contentBlocker
+        profile.siteSettings = SiteSettings(file: nil) // ⌘Q closes no window, so its folder can't be trusted to go
         return profile
     }
 
@@ -111,6 +112,11 @@ final class Profile {
         if spareTab == nil {
             spareTab = Tab(profile: self)
         }
+    }
+
+    /// The spare tab holds its profile, so a profile that's done with has to let go of it.
+    func dropSpareTab() {
+        spareTab = nil
     }
 
     func takeSpareTab() -> Tab {

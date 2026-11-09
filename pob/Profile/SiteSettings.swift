@@ -11,19 +11,20 @@ struct SiteSetting: Codable, Equatable {
 }
 
 final class SiteSettings {
-    private let file: JSONFile<[String: SiteSetting]>
+    private let file: JSONFile<[String: SiteSetting]>?
     private var values: [String: SiteSetting]
 
-    init(file: JSONFile<[String: SiteSetting]>) {
+    /// With no file, the settings live in memory only, as a private window's do.
+    init(file: JSONFile<[String: SiteSetting]>?) {
         self.file = file
-        values = file.load() ?? [:]
+        values = file?.load() ?? [:]
     }
 
     subscript(host: String) -> SiteSetting {
         get { values[host] ?? SiteSetting() }
         set {
             values[host] = newValue == SiteSetting() ? nil : newValue // no empty entries in sites.json
-            do { try file.save(values) } catch {
+            do { try file?.save(values) } catch {
                 Logger(subsystem: "pob", category: "SiteSettings").error("Saving site settings failed: \(error)")
             }
         }

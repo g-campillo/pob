@@ -199,6 +199,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             if profile.isPrivate, !windows.contains(where: { $0.tabs.profile === profile }) {
                 try? FileManager.default.removeItem(at: profile.directory)
                 preparedProfiles.removeAll { $0 === profile }
+                profile.dropSpareTab() // with its cookies, which are in memory only
             }
         }
         if let name = profiles?.name(of: profile.id) {
