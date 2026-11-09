@@ -33,6 +33,7 @@ final class TabManager {
 
     var isEmpty: Bool { list.records.isEmpty }
     var activeTab: Tab? { list.activeID.flatMap(liveTab) }
+    var isCapturingAny: Bool { tabs.values.contains(where: isCapturing) }
 
     /// The records with each live page's place read now, which isn't free, so it's for saving and not for every change.
     var snapshotRecords: [TabRecord] {

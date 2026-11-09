@@ -67,7 +67,7 @@ enum MainMenu {
         return item
     }
 
-    private static func menuItem(for command: Command) -> NSMenuItem {
+    static func menuItem(for command: Command) -> NSMenuItem {
         let target = CommandTarget(command)
         let item = NSMenuItem(title: command.title, action: #selector(CommandTarget.run), keyEquivalent: command.key)
         item.keyEquivalentModifierMask = command.modifiers

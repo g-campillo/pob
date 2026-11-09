@@ -16,6 +16,7 @@ final class Rail: NSView, NSTextFieldDelegate {
     var onAddressChange: ((String) -> Void)?
     var onAddressEndEditing: (() -> Void)?
     var onPointerExit: (() -> Void)?
+    var onProfile: (() -> Void)?
 
     let addressField: NSTextField = AddressField()
     let tabList = TabListView()
@@ -155,6 +156,8 @@ final class Rail: NSView, NSTextFieldDelegate {
         let bottomSpacer = NSView()
         bottomSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         profileButton.isBordered = false
+        profileButton.target = self
+        profileButton.action = #selector(profilePressed)
         profileButton.imagePosition = .imageLeading
         profileButton.lineBreakMode = .byTruncatingTail
         profileButton.setContentHuggingPriority(.defaultHigh, for: .horizontal)
@@ -220,6 +223,7 @@ final class Rail: NSView, NSTextFieldDelegate {
     @objc private func reloadPressed() { onNavigate?(.reload) }
     @objc private func settingsPressed() { onSettings?() }
     @objc private func downloadsPressed() { onDownloads?() }
+    @objc private func profilePressed() { onProfile?() }
 }
 
 extension NSView {

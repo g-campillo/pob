@@ -20,6 +20,8 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
     var onNewWindow: (() -> Void)?
     var onNewPrivateWindow: (() -> Void)?
     var onMakeDefaultBrowser: (() -> Void)?
+    var profileChoices: () -> [ProfileInfo] = { [] }
+    var onSwitchProfile: ((UUID) -> Void)?
 
     private let appearance: AppearanceModel
     private let contentView = NSView()
@@ -90,6 +92,36 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
 
     func showProfile(name: String) {
         rail.update(profileName: name, isPrivate: tabs.profile.isPrivate)
+    }
+
+    /// What the rail's profile button pops up. A private window has no other profile to go to.
+    func profileMenu() -> NSMenu {
+        let menu = NSMenu()
+        if !tabs.profile.isPrivate {
+            for info in profileChoices() {
+                let item = NSMenuItem(title: info.name, action: #selector(profileChosen(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = info.id
+                item.state = info.id == tabs.profile.id ? .on : .off
+                menu.addItem(item)
+            }
+            menu.addItem(.separator())
+        }
+        if let command = commands.command(.newPrivateWindow) {
+            menu.addItem(MainMenu.menuItem(for: command))
+        }
+        return menu
+    }
+
+    @objc private func profileChosen(_ sender: NSMenuItem) {
+        if let id = sender.representedObject as? UUID {
+            onSwitchProfile?(id)
+        }
+    }
+
+    private func showProfileMenu() {
+        let button = rail.profileButton
+        profileMenu().popUp(positioning: nil, at: NSPoint(x: 0, y: button.isFlipped ? button.bounds.maxY : 0), in: button)
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -321,6 +353,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         rail.onNavigate = { [weak self] in self?.perform($0) }
         rail.onSettings = { [weak self] in self?.showAppearancePopover() }
         rail.onDownloads = { [weak self] in self?.showDownloadsPopover() }
+        rail.onProfile = { [weak self] in self?.showProfileMenu() }
         rail.onAddressFocus = { [weak self] in
             guard let self else { return }
             railState.beginEditingAddress()

@@ -9,7 +9,9 @@ final class AppController: NSObject, NSApplicationDelegate {
     private(set) var windows: [WindowController] = []
     /// The list, `profile` and `appearance` are set at launch, past the test-host check, so a test run can't reach the
     /// real profiles. Tests set their own.
-    var profiles: ProfileList?
+    var profiles: ProfileList? {
+        didSet { profiles?.addObserver { [weak self] in self?.windows.forEach { self?.showProfileName(in: $0) } } }
+    }
     /// Where a window opens when nothing says otherwise: the first listed profile.
     var profile: Profile?
     var appearance: AppearanceModel?
@@ -18,6 +20,16 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// Replaceable so a test can't change the Mac's default browser.
     var requestDefault: (String) async throws -> Void = {
         try await NSWorkspace.shared.setDefaultApplication(at: Bundle.main.bundleURL, toOpenURLsWithScheme: $0)
+    }
+    /// A sheet on the window being switched. Replaceable so a test can answer it.
+    var confirmSwitch: (WindowController) async -> Bool = { @MainActor controller in
+        guard let window = controller.window else { return false }
+        let alert = NSAlert()
+        alert.messageText = "Switch profile and end the call in this window?"
+        alert.informativeText = "Its tabs come back when you switch back."
+        alert.addButton(withTitle: "Switch")
+        alert.addButton(withTitle: "Cancel")
+        return await alert.beginSheetModal(for: window) == .alertFirstButtonReturn
     }
     /// Links that arrive before the session is back wait here, so a restored window isn't replaced.
     private var pendingLinks: [AddressInput] = []
@@ -202,9 +214,12 @@ final class AppController: NSObject, NSApplicationDelegate {
                 profile.dropSpareTab() // with its cookies, which are in memory only
             }
         }
-        if let name = profiles?.name(of: profile.id) {
-            controller.showProfile(name: name)
+        controller.profileChoices = { [weak self] in self?.profiles?.all ?? [] }
+        controller.onSwitchProfile = { [weak self, weak controller] id in
+            guard let self, let controller else { return }
+            Task { await self.switchProfile(of: controller, to: id) }
         }
+        showProfileName(in: controller)
         windows.append(controller)
 
         if !Self.isRunningTests { // hosted windows stay off screen
@@ -215,6 +230,34 @@ final class AppController: NSObject, NSApplicationDelegate {
             controller.perform(.openSwitcher)
         }
         Task { profile.prepareSpareTab() } // no launch tab asked for one, and the first Return shouldn't wait
+    }
+
+    /// A private profile isn't listed, so it keeps the name its window gave itself.
+    private func showProfileName(in controller: WindowController) {
+        if let name = profiles?.name(of: controller.tabs.profile.id) {
+            controller.showProfile(name: name)
+        }
+    }
+
+    /// Replaces the window with one in the other profile, in the same place. Its tabs are parked in the old profile
+    /// and come back, after any parked before them, when a window switches back to it.
+    func switchProfile(of controller: WindowController, to id: UUID) async {
+        let old = controller.tabs.profile
+        guard id != old.id, !old.isPrivate else { return }
+        if controller.tabs.isCapturingAny, await !confirmSwitch(controller) { return }
+        if let snapshot = controller.snapshot {
+            old.parked = old.parked?.appending(snapshot) ?? snapshot
+        }
+        let new = makeProfile(id)
+        let frame = controller.window?.frameDescriptor ?? ""
+        var restoring = new.parked ?? WindowSnapshot(tabs: [], activeIndex: 0, frame: frame)
+        new.parked = nil
+        restoring.frame = frame
+        openWindow(restoring: restoring, in: new)
+        controller.close()
+        for profile in [old, new] {
+            profile.session.save(sessionSnapshot(of: profile))
+        }
     }
 
     /// Commands act on the key window. Anything else that's key keeps its keys, so "no window" means nothing is key

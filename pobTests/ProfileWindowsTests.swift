@@ -71,6 +71,77 @@ import Testing
         #expect(a.session.load().windows.count == 1)
         #expect(b.session.load().windows.count == 1)
     }
+    @Test func switchingParksTheTabsAndBringsThemBack() async {
+        let (app, a, b) = app()
+        app.openWindow(restoring: window("https://a.example/", "https://a2.example/"), in: a)
+        await app.switchProfile(of: app.windows[0], to: bID(app))
+        #expect(app.windows.count == 1)
+        #expect(app.windows[0].tabs.profile === b)
+        #expect(app.windows[0].tabs.isEmpty)
+        #expect(a.parked?.tabs.count == 2)
+        #expect(a.session.load().parked?.tabs.count == 2)
+        await app.switchProfile(of: app.windows[0], to: Profile.initialID)
+        #expect(app.windows[0].tabs.list.records.map { $0.url?.host() } == ["a.example", "a2.example"])
+        #expect(a.parked == nil && b.parked == nil) // an empty window parks nothing
+    }
+    @Test func switchingKeepsTheWindowsPlace() async {
+        let (app, a, _) = app()
+        app.openWindow(restoring: nil, in: a)
+        app.windows[0].window?.setFrame(NSRect(x: 100, y: 120, width: 900, height: 700), display: false)
+        await app.switchProfile(of: app.windows[0], to: bID(app))
+        #expect(app.windows[0].window?.frame == NSRect(x: 100, y: 120, width: 900, height: 700))
+    }
+    @Test func parkingTwiceKeepsEveryTab() async {
+        let (app, a, _) = app()
+        app.openWindow(restoring: window("https://1.example/"), in: a)
+        app.openWindow(restoring: window("https://2.example/", "https://3.example/"), in: a)
+        await app.switchProfile(of: app.windows[0], to: bID(app))
+        await app.switchProfile(of: app.windows[0], to: bID(app)) // the second A window, now first in the list
+        #expect(a.parked?.tabs.count == 3)
+    }
+    @Test func aWindowInACallAsksFirstAndCancelChangesNothing() async {
+        let (app, a, _) = app()
+        app.openWindow(restoring: window("https://call.example/"), in: a)
+        app.windows[0].tabs.isCapturing = { _ in true }
+        var asked = 0
+        app.confirmSwitch = { _ in asked += 1; return false }
+        await app.switchProfile(of: app.windows[0], to: bID(app))
+        #expect(asked == 1)
+        #expect(app.windows[0].tabs.profile === a && a.parked == nil)
+    }
+    @Test func theMenuListsEveryProfileAndChecksThisOne() {
+        let (app, a, _) = app()
+        app.openWindow(restoring: nil, in: a)
+        let items = app.windows[0].profileMenu().items
+        #expect(items.prefix(2).map(\.title) == ["Main", "B"])
+        #expect(items[0].state == .on && items[1].state == .off)
+        #expect(items.contains { $0.title == "New Private Window" })
+    }
+    @Test func renamingAProfileRelabelsItsWindows() {
+        let (app, a, _) = app()
+        app.openWindow(restoring: nil, in: a)
+        app.profiles?.rename(Profile.initialID, to: "Home")
+        #expect(app.windows[0].rail.profileButton.title == "Home")
+    }
+
+    @Test func aSwitchedWindowIsNamedAndItsPagesUseThatProfilesStore() async {
+        let (app, a, _) = app()
+        app.openWindow(restoring: window("https://a.example/"), in: a)
+        await app.switchProfile(of: app.windows[0], to: bID(app))
+        #expect(app.windows[0].rail.profileButton.title == "B")
+        await app.switchProfile(of: app.windows[0], to: Profile.initialID)
+        #expect(app.windows[0].rail.profileButton.title == "Main")
+        #expect(app.windows[0].tab?.webView.configuration.websiteDataStore === a.dataStore)
+    }
+    @Test func aPrivateWindowOffersNoProfileAndNeverSwitches() async {
+        let (app, a, _) = app()
+        app.openWindow(restoring: nil, in: .makePrivate(from: a))
+        #expect(app.windows[0].profileMenu().items.map(\.title) == ["New Private Window"])
+        await app.switchProfile(of: app.windows[0], to: bID(app))
+        #expect(app.windows.count == 1 && app.windows[0].tabs.profile.isPrivate)
+    }
+
+    func bID(_ app: AppController) -> UUID { app.profiles!.all[1].id }
 
     func window(_ urls: String...) -> WindowSnapshot {
         WindowSnapshot(tabs: urls.map { TabRecord(url: URL(string: $0)) }, activeIndex: 0, frame: "")
