@@ -289,6 +289,35 @@ import WebKit
         await finishLoading(tab) { tab.webView.reload() }
         #expect(await eventually { await profile.history.search("Home", limit: 5).first?.visitCount == 2 })
     }
+    @Test func aRestoreCancelledByAClickDoesntSwallowTheNextVisit() async throws {
+        let server = LocalServer()
+        server.routes = [
+            "/slow": .stall(sent: Data(), length: nil),
+            "/next": .body(Data("<title>Next</title>".utf8), headers: ["Content-Type": "text/html"]),
+        ]
+        try await server.start()
+        defer { server.stop() }
+        let profile = Profile.temporary()
+        let snapshot = WindowSnapshot(tabs: [TabRecord(url: server.url("/slow"))], activeIndex: 0, frame: "")
+        let tabs = TabManager(profile: profile, keepsSpare: false, restoring: snapshot)
+        let tab = try #require(tabs.activeTab)
+        await finishLoading(tab) { tab.load(.url(server.url("/next"))) }
+        #expect(await eventually { await profile.history.search("Next", limit: 5).first?.visitCount == 1 })
+    }
+    @Test func aRestoreThatFailsDoesntSwallowTheNextVisit() async throws {
+        let server = LocalServer()
+        server.routes = ["/": .body(Data("<title>Fine</title>".utf8), headers: ["Content-Type": "text/html"])]
+        try await server.start()
+        defer { server.stop() }
+        let profile = Profile.temporary()
+        let snapshot = WindowSnapshot(tabs: [TabRecord(url: URL(string: "http://localhost:1/"))], activeIndex: 0, frame: "")
+        let tabs = TabManager(profile: profile, keepsSpare: false, restoring: snapshot)
+        let tab = try #require(tabs.activeTab)
+        await finishLoading(tab) {}
+        #expect(tab.isShowingErrorPage)
+        await finishLoading(tab) { tab.load(.url(server.url("/"))) }
+        #expect(await eventually { await profile.history.search("Fine", limit: 5).first?.visitCount == 1 })
+    }
     @Test func aCommandClickedDownloadLeavesNoBlankTab() async throws {
         let server = LocalServer()
         server.routes = [

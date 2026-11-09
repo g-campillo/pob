@@ -22,8 +22,8 @@ final class TabManager {
     private var openers: [UUID: UUID] = [:]
     /// Tabs a ⌘-click opened, which close again if the link turns out to be a download. Not openers, so ⌘W doesn't change.
     private var linkOpened: Set<UUID> = []
-    /// Rebuilt tabs whose next load only brings the page back, so it isn't a visit.
-    private var restored: Set<UUID> = []
+    /// The address each rebuilt tab is bringing back. That load isn't a visit, and the entry goes at the first finish, whatever it was.
+    private var restored: [UUID: URL] = [:]
     private var recordedTitles: [UUID: String] = [:]
 
     /// Restored tabs start saved, except the active one, so a launch builds one web view per window.
@@ -125,9 +125,10 @@ final class TabManager {
         }
         tab.onLoadFinished = { [weak self, weak tab] in
             if let tab {
+                let restoring = self?.restored.removeValue(forKey: id)
                 self?.list.update(id) { $0.interactionState = nil } // the page is back, so its own state counts from here
                 if !tab.isShowingErrorPage { // a typo would otherwise become a suggestion
-                    if self?.restored.remove(id) == nil { self?.recordVisit(of: tab) }
+                    if restoring == nil || restoring != tab.webView.url { self?.recordVisit(of: tab) }
                     self?.refreshFavicon(of: tab)
                 }
                 self?.onLoadFinished?(tab)
@@ -220,7 +221,7 @@ final class TabManager {
         if tab.webView.url == nil, let url = record.url {
             tab.load(.url(url))
         }
-        if tab.webView.url != nil { restored.insert(record.id) }
+        restored[record.id] = tab.webView.url
     }
 
     /// Keeps the page's place in its record and lets go of the web view.
@@ -231,7 +232,7 @@ final class TabManager {
         phases[id] = nil
         lastActive[id] = nil
         recordedTitles[id] = nil
-        restored.remove(id)
+        restored[id] = nil
     }
 
     /// A page on its way back keeps what it had. It has no title yet, and WebKit's state for a page in mid-load
