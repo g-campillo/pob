@@ -409,10 +409,14 @@ final class AppController: NSObject, NSApplicationDelegate {
         NSApp.orderedWindows.lazy.compactMap(controller(of:)).first ?? windows.last
     }
 
-    /// Holds `self` until the save runs, because a snapshot taken after it was gone would be empty.
+    /// Holds `self` until the save runs, because a snapshot taken after it was gone would be empty. A profile deleted
+    /// or being deleted by then isn't written, because that would make its folder again. Deleting unprepares it.
     private func saveSessionSoon(_ profile: Profile) {
         guard !profile.isPrivate else { return }
-        profile.session.saveSoon { self.sessionSnapshot(of: profile) }
+        profile.session.saveSoon {
+            guard self.preparedProfiles.contains(where: { $0 === profile }), !self.deletingProfiles.contains(profile.id) else { return nil }
+            return self.sessionSnapshot(of: profile)
+        }
     }
 
     /// Once per profile, with its first window.
@@ -493,5 +497,5 @@ final class AppController: NSObject, NSApplicationDelegate {
 
 /// Settings checks first, so this is a window opened while it asked.
 struct ProfileInUse: LocalizedError {
-    var errorDescription: String? { "Close this profile's windows first." }
+    var errorDescription: String? { "Close this profile's windows and private windows first." }
 }

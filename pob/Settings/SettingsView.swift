@@ -43,7 +43,7 @@ private struct ProfileData: View {
     private var deleteCaption: String? {
         if model.deleting.contains(profile.id) { return "Deleting…" }
         if model.profiles.count - model.deleting.count < 2 { return "pob needs at least one profile" }
-        return model.canDelete(profile.id) ? nil : "Close this profile's windows first"
+        return model.canDelete(profile.id) ? nil : "Close this profile's windows and private windows first"
     }
 
     var body: some View {
@@ -98,19 +98,25 @@ private struct ProfileData: View {
     }
 }
 
-/// Renames on Return. A name the list won't take, such as a blank one, puts the current name back.
+/// Renames on Return, and when the field is left, which closing Settings does too. A name the list won't take, such as
+/// a blank one, puts the current name back.
 private struct ProfileNameField: View {
     let model: SettingsModel
     let profile: ProfileInfo
     @State private var name = ""
+    @FocusState private var isFocused: Bool
 
     var body: some View {
         TextField("Profile Name", text: $name)
             .textFieldStyle(.plain)
-            .onSubmit {
-                model.rename(profile.id, to: name)
-                name = model.profiles.first { $0.id == profile.id }?.name ?? name
-            }
+            .focused($isFocused)
+            .onSubmit(rename)
+            .onChange(of: isFocused) { if !isFocused { rename() } }
             .onChange(of: profile.name, initial: true) { name = profile.name }
+    }
+
+    private func rename() {
+        model.rename(profile.id, to: name)
+        name = model.profiles.first { $0.id == profile.id }?.name ?? name
     }
 }

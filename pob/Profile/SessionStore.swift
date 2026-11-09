@@ -31,7 +31,7 @@ final class SessionStore {
     private let file: JSONFile<SessionSnapshot>
     /// Serial, so a slow write can't land on top of a newer one.
     private let writes = DispatchQueue(label: "pob.session")
-    private var pendingSnapshot: (() -> SessionSnapshot)?
+    private var pendingSnapshot: (() -> SessionSnapshot?)?
     /// With no tabs yet, an empty snapshot isn't the user emptying the session, and it could replace one that only failed to load.
     private var hasHadTabs = false
     private var isRestoring = false
@@ -68,15 +68,16 @@ final class SessionStore {
     }
 
     /// The wait runs from the first change, not the last, so a page that keeps changing its title can't hold the save off.
-    func saveSoon(_ snapshot: @escaping () -> SessionSnapshot) {
+    /// A snapshot of nil writes nothing.
+    func saveSoon(_ snapshot: @escaping () -> SessionSnapshot?) {
         let isWaiting = pendingSnapshot != nil
         pendingSnapshot = snapshot
         guard !isWaiting else { return }
         Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(500))
-            guard let self, let snapshot = pendingSnapshot else { return }
+            guard let self, let pending = pendingSnapshot else { return }
             pendingSnapshot = nil
-            if let job = writeJob(for: snapshot()) {
+            if let snapshot = pending(), let job = writeJob(for: snapshot) {
                 writes.async(execute: job)
             }
         }

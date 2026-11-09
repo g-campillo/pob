@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 /// The app's one Settings window. Closing it only hides it, so it comes back as it was.
-final class SettingsWindowController: NSWindowController {
+final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     let model: SettingsModel
 
     init(model: SettingsModel) {
@@ -15,8 +15,14 @@ final class SettingsWindowController: NSWindowController {
         window.isReleasedWhenClosed = false
         window.center()
         super.init(window: window)
+        window.delegate = self
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
+
+    /// Ends any edit, so a name being typed is kept.
+    func windowWillClose(_ notification: Notification) {
+        window?.makeFirstResponder(nil)
+    }
 }

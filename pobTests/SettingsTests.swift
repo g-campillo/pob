@@ -56,6 +56,26 @@ import Testing
         model.rename(model.profiles[1].id, to: "Work")
         #expect(list.name(of: model.profiles[1].id) == "Work")
     }
+    /// A name typed and then left, for another control or by closing Settings, is kept as if Return had been pressed.
+    @Test(arguments: [false, true])
+    func aProfileNameIsKeptWhenTheFieldIsLeft(byClosing: Bool) async throws {
+        let (app, _, b) = ProfileWindowsTests().app()
+        app.openSettings()
+        let window = try #require(app.settingsWindow?.window)
+        window.contentView?.layoutSubtreeIfNeeded()
+        let field = try #require(window.contentView?.subviewsDeep.compactMap { $0 as? NSTextField }.first { $0.stringValue == "B" })
+        #expect(window.makeFirstResponder(field))
+        let editor = try #require(field.currentEditor() as? NSTextView)
+        editor.selectAll(nil)
+        editor.insertText("Work", replacementRange: editor.selectedRange())
+        try await Task.sleep(for: .milliseconds(100)) // SwiftUI sees the focus on its next update, or it never sees it change
+        if byClosing {
+            app.settingsWindow?.close()
+        } else {
+            window.makeFirstResponder(nil)
+        }
+        #expect(await eventually { app.profiles?.name(of: b.id) == "Work" })
+    }
     @Test func theModelsEngineIsTheAppearances() {
         let list = ProfileList(file: JSONFile(url: FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString).json")))
         let appearance = testAppearance()
@@ -298,6 +318,18 @@ import Testing
         await #expect(throws: ProfileInUse.self) { try await deletion.value }
         #expect(FileManager.default.fileExists(atPath: b.directory.path()))
         #expect(app.profiles?.all.count == 2)
+    }
+    /// Closing a profile's last window saves it half a second later, which would make a deleted profile's folder again.
+    @Test func aSaveDueWhenTheProfileIsDeletedWritesNothing() async throws {
+        let (app, _, b) = ProfileWindowsTests().app()
+        app.openWindow(restoring: ProfileWindowsTests().window("https://b.example/"), in: b)
+        app.saveAllSessions() // once it has had tabs, an empty session is saved too
+        #expect(await eventually { FileManager.default.fileExists(atPath: b.directory.appending(path: "history.sqlite").path()) }) // the window's history prune, which no delete can come before
+        app.windows[0].window?.close() // a save is now due
+        app.removeDataStore = { _ in }
+        try await app.deleteProfile(b.id)
+        try await Task.sleep(for: .milliseconds(800))
+        #expect(!FileManager.default.fileExists(atPath: b.directory.path()))
     }
     /// The test host has pob's bundle id, so the real removal would reach the user's own stores.
     @Test func aTestThatForgetsTheSeamRemovesNothing() async throws {
