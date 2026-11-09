@@ -46,6 +46,14 @@ import Testing
         await history.prune(before: Date().addingTimeInterval(-365 * 86_400))
         #expect(await history.search("deploy", limit: 5).isEmpty)
     }
+    @Test func clearRemovesEverything() async {
+        let store = HistoryStore(file: file())
+        await store.record(url: URL(string: "https://a.example/")!, title: "Alpha")
+        await store.clear()
+        #expect(await store.search("Alpha", limit: 10).isEmpty)
+        await store.record(url: URL(string: "https://a.example/")!, title: "Alpha")
+        #expect(await store.search("Alpha", limit: 10).first?.visitCount == 1)
+    }
     @Test func anUnopenableFileDoesntCrash() async {
         let history = HistoryStore(file: URL(fileURLWithPath: "/nonexistent/folder/h.sqlite"))
         await history.record(url: deploy, title: "x")

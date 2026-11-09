@@ -20,6 +20,11 @@ final class SiteSettings {
         values = file?.load() ?? [:]
     }
 
+    /// Sorted.
+    var hostsWithAdBlockerOff: [String] {
+        values.filter { $0.value.adBlockerOff == true }.keys.sorted()
+    }
+
     subscript(host: String) -> SiteSetting {
         get { values[host] ?? SiteSetting() }
         set {

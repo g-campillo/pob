@@ -10,7 +10,13 @@ final class Profile {
     let parent: Profile?
     var isPrivate: Bool { parent != nil }
     /// Built on first use, because building it makes folders in the store, and a test reading `Profile.initial` mustn't.
-    lazy var dataStore: WKWebsiteDataStore = isPersistent ? WKWebsiteDataStore(forIdentifier: id) : .nonPersistent()
+    var dataStore: WKWebsiteDataStore {
+        if let dataStoreIfBuilt { return dataStoreIfBuilt }
+        let store: WKWebsiteDataStore = isPersistent ? WKWebsiteDataStore(forIdentifier: id) : .nonPersistent()
+        dataStoreIfBuilt = store
+        return store
+    }
+    private var dataStoreIfBuilt: WKWebsiteDataStore?
 
     lazy var siteSettings = SiteSettings(file: JSONFile(url: directory.appending(path: "sites.json")))
 
@@ -117,6 +123,11 @@ final class Profile {
     /// The spare tab holds its profile, so a profile that's done with has to let go of it.
     func dropSpareTab() {
         spareTab = nil
+    }
+
+    /// WebKit won't remove a store from disk while anything holds it, the profile included. Used again, it's built again.
+    func dropDataStore() {
+        dataStoreIfBuilt = nil
     }
 
     func takeSpareTab() -> Tab {

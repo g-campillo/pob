@@ -1,4 +1,6 @@
 import AppKit
+import OSLog
+import WebKit
 
 @main
 final class AppController: NSObject, NSApplicationDelegate {
@@ -21,6 +23,17 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// Replaceable so a test can't change the Mac's default browser.
     var requestDefault: (String) async throws -> Void = {
         try await NSWorkspace.shared.setDefaultApplication(at: Bundle.main.bundleURL, toOpenURLsWithScheme: $0)
+    }
+    /// Replaceable so a test never removes a real store. WebKit refuses until the last page of a dropped store has
+    /// closed, a moment later, so this keeps trying for two seconds.
+    var removeDataStore: @MainActor (UUID) async throws -> Void = { id in
+        for attempt in 1... {
+            do {
+                return try await WKWebsiteDataStore.remove(forIdentifier: id)
+            } catch where attempt < 20 {
+                try await Task.sleep(for: .milliseconds(100))
+            }
+        }
     }
     /// A sheet on the window being switched. Replaceable so a test can answer it.
     var confirmSwitch: (WindowController) async -> Bool = { @MainActor controller in
@@ -265,6 +278,34 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// More than one profile, and no window open in it or in a private window opened from it, which writes to its bookmarks.
+    func canDeleteProfile(_ id: UUID) -> Bool {
+        guard let profiles, profiles.all.count > 1, profiles.name(of: id) != nil else { return false }
+        return !windows.contains { $0.tabs.profile.id == id || $0.tabs.profile.parent?.id == id }
+    }
+
+    /// The data store goes first, because it's the part that can refuse, and until it's gone nothing else is touched.
+    /// Favicons are shared by every profile, so they stay.
+    func deleteProfile(_ id: UUID) async throws {
+        guard let profiles, canDeleteProfile(id) else { throw ProfileInUse() }
+        let deleted = makeProfile(id)
+        deleted.dropSpareTab()
+        deleted.dropDataStore()
+        try await removeDataStore(id)
+        do {
+            try FileManager.default.removeItem(at: deleted.directory)
+        } catch CocoaError.fileNoSuchFile {
+        } catch {
+            Logger(subsystem: "pob", category: "AppController").error("Removing a deleted profile's folder failed: \(error)")
+        }
+        profiles.remove(id)
+        Profile.forget(id: id)
+        preparedProfiles.removeAll { $0 === deleted }
+        if profile === deleted {
+            profile = makeProfile(profiles.all[0].id)
+        }
+    }
+
     /// Commands act on the key window. Anything else that's key keeps its keys, so "no window" means nothing is key
     /// and no browser window is showing. A minimized one doesn't count, or ⌘N would do nothing. Settings isn't a browser
     /// window, so from there commands go to the front one, as if none were key, except that ⌘W closes Settings. That
@@ -296,6 +337,13 @@ final class AppController: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 Task { await self.makeDefaultBrowser(keyWindow: self.settingsWindow?.window) }
             }
+            // Only listed ids, because using a deleted profile's history would make its folder again.
+            model.findProfile = { [weak self] id in
+                guard let self, self.profiles?.name(of: id) != nil else { return nil }
+                return makeProfile(id)
+            }
+            model.canDeleteProfile = { [weak self] in self?.canDeleteProfile($0) ?? false }
+            model.deleteProfile = { [weak self] in try await self?.deleteProfile($0) }
             settingsWindow = SettingsWindowController(model: model)
         }
         if let profileID {
@@ -396,4 +444,9 @@ final class AppController: NSObject, NSApplicationDelegate {
             controller.tabs.updatePhases(now: now, memoryPressure: memoryPressure)
         }
     }
+}
+
+/// Settings checks first, so this is a window opened while it asked.
+struct ProfileInUse: LocalizedError {
+    var errorDescription: String? { "Close this profile's windows first." }
 }

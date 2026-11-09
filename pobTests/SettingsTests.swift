@@ -128,6 +128,119 @@ import Testing
         button.performClick(nil)
         #expect(opened)
     }
+    @Test func sitesWithBlockingOffCanBeTurnedBackOn() throws {
+        let (app, _, profile) = ProfileWindowsTests().app()
+        profile.siteSettings["b.example"].adBlockerOff = true
+        profile.siteSettings["a.example"].adBlockerOff = true
+        profile.siteSettings["z.example"].zoom = 1.5
+        #expect(profile.siteSettings.hostsWithAdBlockerOff == ["a.example", "b.example"])
+        app.openSettings()
+        let model = try #require(app.settingsWindow?.model)
+        #expect(model.sitesWithBlockingOff(of: profile.id) == ["a.example", "b.example"])
+        model.turnBlockingBackOn("a.example", in: profile.id)
+        #expect(model.sitesWithBlockingOff(of: profile.id) == ["b.example"])
+        #expect(profile.siteSettings["z.example"].zoom == 1.5)
+    }
+    @Test func clearingHistoryInSettingsLeavesOtherProfilesAlone() async throws {
+        let (app, a, b) = ProfileWindowsTests().app()
+        await a.history.record(url: URL(string: "https://a.example/")!, title: "Alpha")
+        await b.history.record(url: URL(string: "https://a.example/")!, title: "Alpha")
+        app.openSettings()
+        await app.settingsWindow?.model.clearHistory(of: a.id)
+        #expect(await a.history.search("Alpha", limit: 10).isEmpty)
+        #expect(await b.history.search("Alpha", limit: 10).count == 1)
+    }
+    @Test func aProfileWithAWindowOpenOrTheLastOneCantBeDeleted() {
+        let (app, a, _) = ProfileWindowsTests().app()
+        app.openWindow(restoring: nil, in: a)
+        #expect(!app.canDeleteProfile(Profile.initialID))
+        #expect(app.canDeleteProfile(app.profiles!.all[1].id))
+        app.profiles?.remove(app.profiles!.all[1].id)
+        app.windows[0].window?.close()
+        #expect(!app.canDeleteProfile(Profile.initialID)) // the only one
+    }
+    /// A private window writes to its parent's bookmarks, which would bring the deleted folder back.
+    @Test func aProfileWithAPrivateWindowOpenCantBeDeleted() {
+        let (app, _, b) = ProfileWindowsTests().app()
+        app.openWindow(restoring: nil, in: .makePrivate(from: b))
+        #expect(!app.canDeleteProfile(b.id))
+        app.windows[0].window?.close()
+        #expect(app.canDeleteProfile(b.id))
+    }
+    @Test func aProfileThatCantBeDeletedIsLeftAlone() async throws {
+        let (app, _, b) = ProfileWindowsTests().app()
+        app.openWindow(restoring: nil, in: b)
+        try FileManager.default.createDirectory(at: b.directory, withIntermediateDirectories: true)
+        var removed: [UUID] = []
+        app.removeDataStore = { removed.append($0) }
+        await #expect(throws: ProfileInUse.self) { try await app.deleteProfile(b.id) }
+        #expect(removed.isEmpty)
+        #expect(FileManager.default.fileExists(atPath: b.directory.path()))
+        #expect(app.profiles?.all.count == 2)
+    }
+    @Test func deletingRemovesTheFolderTheDataStoreAndTheEntry() async throws {
+        let (app, _, b) = ProfileWindowsTests().app()
+        let id = app.profiles!.all[1].id
+        try FileManager.default.createDirectory(at: b.directory, withIntermediateDirectories: true)
+        var removed: [UUID] = []
+        app.removeDataStore = { removed.append($0) }
+        try await app.deleteProfile(id)
+        #expect(removed == [id])
+        #expect(!FileManager.default.fileExists(atPath: b.directory.path()))
+        #expect(app.profiles?.all.map(\.id) == [Profile.initialID])
+    }
+    @Test func aDataStoreThatWontGoKeepsTheProfile() async throws {
+        let (app, _, b) = ProfileWindowsTests().app()
+        let id = app.profiles!.all[1].id
+        try FileManager.default.createDirectory(at: b.directory, withIntermediateDirectories: true)
+        app.removeDataStore = { _ in throw CocoaError(.fileWriteNoPermission) }
+        await #expect(throws: CocoaError.self) { try await app.deleteProfile(id) }
+        #expect(FileManager.default.fileExists(atPath: b.directory.path()))
+        #expect(app.profiles?.all.count == 2)
+    }
+    @Test func deletingTheFirstProfileMovesNewWindowsToTheNext() async throws {
+        let (app, _, b) = ProfileWindowsTests().app()
+        app.removeDataStore = { _ in }
+        try await app.deleteProfile(Profile.initialID)
+        #expect(app.profile === b)
+    }
+    /// WebKit won't remove a store that a page, or the profile itself, still holds.
+    @Test func deletingAProfileWithASpareTabDropsItFirst() async throws {
+        let (app, _, b) = ProfileWindowsTests().app()
+        b.prepareSpareTab()
+        var spareWhenRemoved: Tab?
+        var storeWhenRemoved = ""
+        app.removeDataStore = { _ in
+            spareWhenRemoved = b.spareTab
+            storeWhenRemoved = Mirror(reflecting: b).children.first { $0.label?.contains("dataStore") == true }.map { "\($0.value)" } ?? "no such property"
+        }
+        try await app.deleteProfile(b.id)
+        #expect(spareWhenRemoved == nil)
+        #expect(storeWhenRemoved == "nil")
+    }
+    /// A save at quit goes to every profile that had a window, and it would write the deleted folder back.
+    @Test func aDeletedProfileIsntSavedAtQuit() async throws {
+        let (app, _, b) = ProfileWindowsTests().app()
+        app.openWindow(restoring: ProfileWindowsTests().window("https://b.example/"), in: b)
+        app.saveAllSessions() // once it has had tabs, an empty session is saved too
+        app.windows[0].window?.close()
+        let session = JSONFile<SessionSnapshot>(url: b.directory.appending(path: "session.json")) // the store's own load would reset it
+        #expect(await eventually { session.load()?.windows.isEmpty == true }) // the close's save has landed
+        app.removeDataStore = { _ in }
+        try await app.deleteProfile(b.id)
+        app.saveAllSessions()
+        #expect(!FileManager.default.fileExists(atPath: b.directory.path()))
+    }
+    @Test func deletingFromSettingsClearsTheSelection() async throws {
+        let (app, _, b) = ProfileWindowsTests().app()
+        app.removeDataStore = { _ in }
+        app.openSettings(selecting: b.id)
+        let model = try #require(app.settingsWindow?.model)
+        #expect(model.canDelete(b.id))
+        try await model.delete(b.id)
+        #expect(model.profiles.map(\.id) == [Profile.initialID] && model.selectedProfileID == nil)
+        #expect(!model.canDelete(Profile.initialID))
+    }
     @Test func aPrivateWindowManagesItsParentProfile() throws {
         let (app, _, b) = ProfileWindowsTests().app()
         app.openWindow(restoring: nil, in: .makePrivate(from: b))

@@ -18,9 +18,82 @@ struct SettingsView: View {
                 .frame(height: 160)
                 Button("New Profile") { model.addProfile() }
             }
+            if let profile = model.profiles.first(where: { $0.id == model.selectedProfileID }) {
+                ProfileData(model: model, profile: profile)
+                    .id(profile.id)
+            }
         }
         .formStyle(.grouped)
         .frame(width: 480)
+    }
+}
+
+/// The selected profile's history, blocked sites and deletion. Windows open and close and sites change while Settings
+/// stays open behind, so what can change from elsewhere is read again each time the window comes forward.
+private struct ProfileData: View {
+    let model: SettingsModel
+    let profile: ProfileInfo
+    @Environment(\.appearsActive) private var appearsActive
+    @State private var sites: [String] = []
+    @State private var confirmsClear = false
+    @State private var confirmsDelete = false
+    @State private var showsFailure = false
+    @State private var failure = ""
+
+    private var deleteCaption: String? {
+        if model.profiles.count < 2 { return "pob needs at least one profile" }
+        return model.canDelete(profile.id) ? nil : "Close this profile's windows first"
+    }
+
+    var body: some View {
+        Section("Sites with ad blocking off") {
+            if sites.isEmpty {
+                Text("None").foregroundStyle(.secondary)
+            }
+            ForEach(sites, id: \.self) { host in
+                LabeledContent(host) {
+                    Button("Turn On") {
+                        model.turnBlockingBackOn(host, in: profile.id)
+                        sites = model.sitesWithBlockingOff(of: profile.id)
+                    }
+                }
+            }
+        }
+        .onChange(of: appearsActive, initial: true) { sites = model.sitesWithBlockingOff(of: profile.id) }
+        Section {
+            Button("Clear History…") { confirmsClear = true }
+                .confirmationDialog("Clear all history for \(profile.name)?", isPresented: $confirmsClear, titleVisibility: .visible) {
+                    Button("Clear History", role: .destructive) {
+                        Task { await model.clearHistory(of: profile.id) }
+                    }
+                }
+            VStack(alignment: .leading) {
+                Button("Delete Profile…", role: .destructive) { confirmsDelete = true }
+                    .disabled(deleteCaption != nil)
+                if let deleteCaption {
+                    Text(deleteCaption).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .confirmationDialog("Delete \(profile.name)?", isPresented: $confirmsDelete, titleVisibility: .visible) {
+                Button("Delete", role: .destructive) { delete() }
+            } message: {
+                Text("Its tabs, history, bookmarks, logins and site data are removed.")
+            }
+            .alert("Couldn't delete \(profile.name)", isPresented: $showsFailure) {} message: {
+                Text(failure)
+            }
+        }
+    }
+
+    private func delete() {
+        Task {
+            do {
+                try await model.delete(profile.id)
+            } catch {
+                failure = error.localizedDescription
+                showsFailure = true
+            }
+        }
     }
 }
 

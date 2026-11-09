@@ -101,6 +101,10 @@ actor HistoryStore {
         }
     }
 
+    func clear() {
+        transaction { run("DELETE FROM history_fts") && run("DELETE FROM visits") }
+    }
+
     // MARK: SQLite
 
     private enum Value {
