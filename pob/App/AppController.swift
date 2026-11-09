@@ -208,8 +208,11 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// A window opened from another steps away from it. Exactly on top, it would look as if nothing had happened.
     func openWindow(restoring snapshot: WindowSnapshot?, in profile: Profile? = nil, cascadingFrom parent: NSWindow? = nil) {
         guard let profile = profile ?? self.profile, let appearance else { return }
+        // With no window left in the profile nothing else would bring its parked tabs back. They open where a new window would.
+        let unparked = snapshot == nil && !windows.contains { $0.tabs.profile === profile } ? profile.parked : nil
+        if unparked != nil { profile.parked = nil }
         prepare(profile)
-        let controller = WindowController(appearance: appearance, tabs: TabManager(profile: profile, restoring: snapshot))
+        let controller = WindowController(appearance: appearance, tabs: TabManager(profile: profile, restoring: snapshot ?? unparked))
         if let snapshot, snapshot.hasFiniteFrame {
             controller.window?.setFrame(from: snapshot.frame)
         }
@@ -218,7 +221,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             window.cascadeTopLeft(from: stepped)
         }
         controller.onTabsChanged = { [weak self] in self?.saveSessionSoon(profile) }
-        if snapshot != nil, !hasRestored { // a window the launch brings back
+        if (snapshot ?? unparked) != nil, !hasRestored { // a window the launch brings back
             controller.onActivePageFinished = { [weak self] in self?.logLaunch() }
         }
         controller.onNewWindow = { [weak self, weak controller] in
@@ -249,6 +252,7 @@ final class AppController: NSObject, NSApplicationDelegate {
         }
         showProfileName(in: controller)
         windows.append(controller)
+        if unparked != nil { profile.session.save(sessionSnapshot(of: profile)) }
 
         if !Self.isRunningTests { // hosted windows stay off screen
             controller.showWindow(nil)

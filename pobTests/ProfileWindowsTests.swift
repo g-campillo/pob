@@ -30,12 +30,47 @@ import Testing
     @Test func parkedTabsComeBackIntoTheProfileAndSurviveASave() {
         let (app, _, b) = app()
         let parked = window("https://parked.example/")
-        b.session.save(SessionSnapshot(windows: [], parked: parked))
+        b.session.save(SessionSnapshot(windows: [window("https://b.example/")], parked: parked))
         app.restoreSession()
         #expect(b.parked == parked)
-        app.openWindow(restoring: nil, in: b) // so the save below really writes b
         app.saveAllSessions()
         #expect(b.session.load().parked == parked)
+    }
+    /// With no window left in their profile, nothing else would ever bring parked tabs back.
+    @Test func aNewWindowInAProfileWithNoneOpenBringsItsParkedTabsBack() async {
+        let (app, a, _) = app()
+        app.openWindow(restoring: window("https://a.example/", "https://a2.example/"), in: a)
+        let parkedFrame = NSRect(x: 100, y: 120, width: 900, height: 700)
+        app.windows[0].window?.setFrame(parkedFrame, display: false)
+        await app.switchProfile(of: app.windows[0], to: bID(app))
+        app.windows[0].window?.close()
+        #expect(app.windows.isEmpty && a.parked != nil)
+        app.perform(.newWindow, keyWindow: nil)
+        #expect(app.windows.count == 1 && app.windows[0].tabs.profile === a)
+        #expect(app.windows[0].tabs.list.records.map { $0.url?.host() } == ["a.example", "a2.example"])
+        #expect(app.windows[0].window?.frame != parkedFrame) // a new window's place
+        #expect(a.parked == nil)
+        let saved = a.session.load()
+        #expect(saved.parked == nil && saved.windows.map(\.tabs.count) == [2])
+    }
+    @Test func aLaunchWithOnlyParkedTabsOpensThem() {
+        let (app, a, _) = app()
+        a.session.save(SessionSnapshot(windows: [], parked: window("https://parked.example/")))
+        app.restoreSession()
+        #expect(app.windows.count == 1 && app.windows[0].tabs.profile === a)
+        #expect(app.windows[0].tabs.list.records.map { $0.url?.host() } == ["parked.example"])
+        #expect(a.parked == nil && a.session.load().parked == nil)
+    }
+    /// While the profile has a window, its parked tabs wait for a switch back.
+    @Test func aNewWindowBesideAnOpenOneLeavesTheParkedTabsParked() async {
+        let (app, a, _) = app()
+        app.openWindow(restoring: window("https://a.example/"), in: a)
+        app.openWindow(restoring: window("https://a2.example/"), in: a)
+        await app.switchProfile(of: app.windows[0], to: bID(app)) // the first parks, the second stays in A
+        #expect(app.windows[0].tabs.profile === a)
+        app.windows[0].perform(.newWindow)
+        #expect(app.windows.count == 3 && app.windows[2].tabs.profile === a && app.windows[2].tabs.isEmpty)
+        #expect(a.parked?.tabs.count == 1)
     }
     @Test func aWindowsChangesSaveOnlyItsProfile() async {
         let (app, a, b) = app()
