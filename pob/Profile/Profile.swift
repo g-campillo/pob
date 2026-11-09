@@ -23,11 +23,17 @@ final class Profile {
     lazy var downloads = Downloads(directory: downloadsDirectory)
 
     /// Built with the first tab. A test sets its own, for small lists and no network.
-    lazy var contentBlocker = ContentBlocker(
+    lazy var contentBlocker: ContentBlocker = usesSharedRules ? .shared : ContentBlocker(
         cacheDirectory: directory.appending(path: "rules", directoryHint: .isDirectory),
         bundledDirectory: Bundle.main.resourceURL ?? directory,
         fetch: { try await ContentBlocker.download($0) }
     )
+
+    /// In memory only: AppController (Task 2) fills it and saves it with the session.
+    var parked: WindowSnapshot?
+
+    /// Persistent profiles share one set of rules. A temporary one keeps its own, so a test never touches the real cache.
+    var usesSharedRules: Bool { isPersistent }
 
     private let faviconDirectory: URL
     private let downloadsDirectory: URL
@@ -35,13 +41,34 @@ final class Profile {
     /// Built ahead of time, so a new tab doesn't wait for a web view.
     private(set) var spareTab: Tab?
 
-    static let initial = Profile(
-        id: UUID(uuidString: "6F0B5C2E-2F4B-4C6E-9B52-1F6B0A5D7C11")!,
-        directory: URL.applicationSupportDirectory.appending(path: "pob/profiles/6F0B5C2E-2F4B-4C6E-9B52-1F6B0A5D7C11", directoryHint: .isDirectory),
-        isPersistent: true,
-        faviconDirectory: URL.applicationSupportDirectory.appending(path: "pob/favicons", directoryHint: .isDirectory),
-        downloadsDirectory: URL.downloadsDirectory
-    )
+    static let initialID = UUID(uuidString: "6F0B5C2E-2F4B-4C6E-9B52-1F6B0A5D7C11")!
+
+    static let initial = makePersistent(id: initialID)
+
+    private static var persistentProfiles: [UUID: Profile] = [:]
+
+    /// One instance per id, so every window of a profile shares its stores.
+    static func persistent(id: UUID) -> Profile {
+        if id == initialID { return initial }
+        if let profile = persistentProfiles[id] { return profile }
+        let profile = makePersistent(id: id)
+        persistentProfiles[id] = profile
+        return profile
+    }
+
+    static func forget(id: UUID) {
+        persistentProfiles[id] = nil
+    }
+
+    private static func makePersistent(id: UUID) -> Profile {
+        Profile(
+            id: id,
+            directory: URL.applicationSupportDirectory.appending(path: "pob/profiles/\(id.uuidString)", directoryHint: .isDirectory),
+            isPersistent: true,
+            faviconDirectory: URL.applicationSupportDirectory.appending(path: "pob/favicons", directoryHint: .isDirectory),
+            downloadsDirectory: URL.downloadsDirectory
+        )
+    }
 
     /// Private data store and a unique temp folder, for tests.
     static func temporary() -> Profile {

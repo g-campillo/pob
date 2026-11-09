@@ -17,6 +17,13 @@ final class ContentBlocker {
         FilterList(name: "easyprivacy", remote: URL(string: "https://easylist.to/easylist/easyprivacy.txt")!),
     ]
 
+    /// The rules every persistent profile shares.
+    static let shared = ContentBlocker(
+        cacheDirectory: URL.applicationSupportDirectory.appending(path: "pob/rules", directoryHint: .isDirectory),
+        bundledDirectory: Bundle.main.resourceURL ?? URL.applicationSupportDirectory,
+        fetch: { try await download($0) }
+    )
+
     private(set) var ruleLists: [WKContentRuleList] = []
 
     private struct ListState: Codable {

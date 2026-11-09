@@ -11,10 +11,18 @@ nonisolated struct WindowSnapshot: Codable, Equatable {
 
     /// `setFrame(from:)` throws on a NaN in any field, and this comes from a file that can hold anything.
     var hasFiniteFrame: Bool { frame.split(separator: " ").allSatisfy { Double($0)?.isFinite == true } }
+
+    /// `other`'s tabs after these, with `other`'s active tab and frame.
+    func appending(_ other: WindowSnapshot) -> WindowSnapshot {
+        WindowSnapshot(tabs: tabs + other.tabs, activeIndex: tabs.count + other.activeIndex, frame: other.frame)
+    }
 }
 
 nonisolated struct SessionSnapshot: Codable, Equatable {
     var windows: [WindowSnapshot]
+    var parked: WindowSnapshot? = nil
+
+    var hasTabs: Bool { !windows.isEmpty || parked != nil }
 }
 
 /// The windows and tabs to bring back at launch. A snapshot holds every page's state, so it can be large: it's only
@@ -38,7 +46,7 @@ final class SessionStore {
     func load() -> SessionSnapshot {
         let loaded = file.loadChecked()
         let snapshot = loaded.value ?? SessionSnapshot(windows: [])
-        hasHadTabs = !snapshot.windows.isEmpty
+        hasHadTabs = snapshot.hasTabs
         mustKeepFile = !loaded.isReplaceable
         return snapshot
     }
@@ -77,7 +85,7 @@ final class SessionStore {
     /// The one way to the file. Without `@Sendable` the job takes the main actor's isolation: it builds clean, then crashes on the queue.
     private func writeJob(for snapshot: SessionSnapshot) -> DispatchWorkItem? {
         guard !isRestoring, !mustKeepFile else { return nil }
-        hasHadTabs = hasHadTabs || !snapshot.windows.isEmpty
+        hasHadTabs = hasHadTabs || snapshot.hasTabs
         guard hasHadTabs else { return nil }
         return DispatchWorkItem { @Sendable [file] in
             do { try file.save(snapshot) } catch {

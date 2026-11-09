@@ -85,4 +85,21 @@ import Testing
         model.toggleSnap()
         #expect(calls == 2)
     }
+    // Only paths and identity: no store of a persistent profile is touched.
+    @Test func persistentGivesOneProfilePerID() {
+        let id = UUID()
+        defer { Profile.forget(id: id) }
+        #expect(Profile.persistent(id: id) === Profile.persistent(id: id))
+        #expect(Profile.persistent(id: Profile.initialID) === Profile.initial)
+        #expect(Profile.persistent(id: id).directory.path().hasSuffix("pob/profiles/\(id.uuidString)/"))
+        #expect(Profile.persistent(id: id).usesSharedRules)
+        #expect(!Profile.temporary().usesSharedRules) // tests keep their rules in their own folder
+    }
+    @Test func forgettingAProfileGivesAFreshOneNextTime() {
+        let id = UUID()
+        let first = Profile.persistent(id: id)
+        Profile.forget(id: id)
+        #expect(Profile.persistent(id: id) !== first)
+        Profile.forget(id: id)
+    }
 }

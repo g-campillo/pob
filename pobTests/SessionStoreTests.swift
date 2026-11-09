@@ -274,6 +274,28 @@ import Testing
         store.save(snapshot("after"))
         #expect(file.load() == snapshot("after"))
     }
+
+    @Test func aStage2SessionWithNoParkedTabsLoads() throws {
+        let file = file()
+        try Data(#"{"windows":[{"tabs":[],"activeIndex":0,"frame":"0 0 800 600 0 0 1440 900 "}]}"#.utf8).write(to: file.url)
+        let loaded = SessionStore(file: file).load()
+        #expect(loaded.windows.count == 1)
+        #expect(loaded.parked == nil)
+    }
+    @Test func parkedTabsAloneAreWorthSaving() throws {
+        let file = file()
+        let parked = WindowSnapshot(tabs: [TabRecord(url: URL(string: "https://a.example/"))], activeIndex: 0, frame: "")
+        SessionStore(file: file).save(SessionSnapshot(windows: [], parked: parked))
+        #expect(try file.read()?.parked == parked)
+    }
+    @Test func appendingKeepsEveryTabAndTheNewerPlace() {
+        let a = WindowSnapshot(tabs: [TabRecord(url: nil), TabRecord(url: nil)], activeIndex: 1, frame: "a")
+        let b = WindowSnapshot(tabs: [TabRecord(url: nil)], activeIndex: 0, frame: "b")
+        let both = a.appending(b)
+        #expect(both.tabs.map(\.id) == a.tabs.map(\.id) + b.tabs.map(\.id))
+        #expect(both.activeIndex == 2)
+        #expect(both.frame == "b")
+    }
 }
 
 private final class Reached {
