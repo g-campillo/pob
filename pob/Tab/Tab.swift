@@ -389,7 +389,8 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
         // The realm is the server's own text, so it's quoted and cut short.
         let realm = space.realm.map { "The site says: \"\($0.prefix(100))\"" } ?? ""
         let retry = challenge.previousFailureCount > 0 ? "That didn't work. Try again.\n" : ""
-        alert.informativeText = retry + realm
+        let warning = space.receivesCredentialSecurely ? "" : "\nYour password will be sent unencrypted."
+        alert.informativeText = retry + realm + warning
         alert.accessoryView = fields
         alert.addButton(withTitle: "Sign In")
         alert.addButton(withTitle: "Cancel")
@@ -509,15 +510,23 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
             openSettings: openSettings, decision: decision)
     }
 
+    /// The sheet says which site asked, because the page's own text could claim to be anyone.
+    private func dialog(saying text: String, from frame: WKFrameInfo) -> NSAlert {
+        let host = frame.securityOrigin.host
+        let alert = NSAlert()
+        alert.messageText = host.isEmpty ? "This page says" : "\(host) says"
+        alert.informativeText = text
+        return alert
+    }
+
     func webView(
         _ webView: WKWebView,
         runJavaScriptAlertPanelWithMessage message: String,
         initiatedByFrame frame: WKFrameInfo,
         completionHandler: @escaping @MainActor () -> Void
     ) {
-        let alert = NSAlert()
-        alert.messageText = message
-        alert.present(in: webView.window) { _ in completionHandler() }
+        let alert = dialog(saying: message, from: frame)
+        present(alert) { _ in completionHandler() }
     }
 
     func webView(
@@ -526,11 +535,10 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
         initiatedByFrame frame: WKFrameInfo,
         completionHandler: @escaping @MainActor (Bool) -> Void
     ) {
-        let alert = NSAlert()
-        alert.messageText = message
+        let alert = dialog(saying: message, from: frame)
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Cancel")
-        alert.present(in: webView.window) { completionHandler($0 == .alertFirstButtonReturn) }
+        present(alert) { completionHandler($0 == .alertFirstButtonReturn) }
     }
 
     func webView(
@@ -542,12 +550,11 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
     ) {
         let field = NSTextField(string: defaultText ?? "")
         field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
-        let alert = NSAlert()
-        alert.messageText = prompt
+        let alert = dialog(saying: prompt, from: frame)
         alert.accessoryView = field
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Cancel")
-        alert.present(in: webView.window) { response in
+        present(alert) { response in
             completionHandler(response == .alertFirstButtonReturn ? field.stringValue : nil)
         }
     }

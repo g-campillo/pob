@@ -32,9 +32,9 @@ private func badCertificate(host: String) -> URLAuthenticationChallenge {
         failureResponse: nil, error: nil, sender: Sender())
 }
 
-private func passwordChallenge(host: String, realm: String?, failures: Int = 0) -> URLAuthenticationChallenge {
+private func passwordChallenge(host: String, realm: String?, failures: Int = 0, scheme: String = "http") -> URLAuthenticationChallenge {
     URLAuthenticationChallenge(
-        protectionSpace: URLProtectionSpace(host: host, port: 80, protocol: "http", realm: realm, authenticationMethod: NSURLAuthenticationMethodHTTPBasic),
+        protectionSpace: URLProtectionSpace(host: host, port: scheme == "https" ? 443 : 80, protocol: scheme, realm: realm, authenticationMethod: NSURLAuthenticationMethodHTTPBasic),
         proposedCredential: nil, previousFailureCount: failures, failureResponse: nil, error: nil, sender: Sender())
 }
 
@@ -266,5 +266,14 @@ private func fields(of alert: NSAlert) -> [NSTextField] { alert.accessoryView?.s
         tab.alertSeam = { text = $0.informativeText; return .alertSecondButtonReturn }
         _ = await answer(tab, passwordChallenge(host: "h.example", realm: nil, failures: 1))
         #expect(text.contains("Try again"))
+    }
+    @Test(.timeLimit(.minutes(1))) func signInOverPlainHTTPWarns() async {
+        let tab = Tab(profile: .temporary())
+        var text = ""
+        tab.alertSeam = { text = $0.informativeText; return .alertSecondButtonReturn }
+        _ = await answer(tab, passwordChallenge(host: "127.0.0.1", realm: nil))
+        #expect(text.contains("sent unencrypted"))
+        _ = await answer(tab, passwordChallenge(host: "h.example", realm: nil, scheme: "https"))
+        #expect(!text.contains("sent unencrypted"))
     }
 }

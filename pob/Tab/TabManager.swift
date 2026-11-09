@@ -20,6 +20,10 @@ final class TabManager {
     private var phases: [UUID: TabPhase] = [:]
     private var lastActive: [UUID: Date] = [:]
     private var openers: [UUID: UUID] = [:]
+    /// Tabs a ⌘-click opened, which close again if the link turns out to be a download. Not openers, so ⌘W doesn't change.
+    private var linkOpened: Set<UUID> = []
+    /// Rebuilt tabs whose next load only brings the page back, so it isn't a visit.
+    private var restored: Set<UUID> = []
     private var recordedTitles: [UUID: String] = [:]
 
     /// Restored tabs start saved, except the active one, so a launch builds one web view per window.
@@ -65,6 +69,7 @@ final class TabManager {
     func close(_ id: UUID) {
         release(id)
         openers[id] = nil
+        linkOpened.remove(id)
         changeList { $0.close(id) }
     }
 
@@ -122,7 +127,7 @@ final class TabManager {
             if let tab {
                 self?.list.update(id) { $0.interactionState = nil } // the page is back, so its own state counts from here
                 if !tab.isShowingErrorPage { // a typo would otherwise become a suggestion
-                    self?.recordVisit(of: tab)
+                    if self?.restored.remove(id) == nil { self?.recordVisit(of: tab) }
                     self?.refreshFavicon(of: tab)
                 }
                 self?.onLoadFinished?(tab)
@@ -133,7 +138,10 @@ final class TabManager {
             onActiveProgress?(progress, isLoading)
         }
         tab.onOpenLink = { [weak self] request, activate in
-            self?.newTab(nil, activate: activate).webView.load(request)
+            guard let self else { return }
+            let opened = newTab(nil, activate: activate)
+            if let key = tabs.first(where: { $0.value === opened })?.key { linkOpened.insert(key) }
+            opened.webView.load(request)
         }
         tab.onCreatePopup = { [weak self] configuration in
             guard let self else { return nil }
@@ -147,7 +155,7 @@ final class TabManager {
             // A `target="_blank"` attachment opens a tab that never gets a page, so it goes back to where it came from.
             // `url` already holds the address being loaded, so the committed page is what says whether it has one.
             let committed = tab?.webView.backForwardList.currentItem?.url
-            guard let self, openers[id] != nil, committed == nil || committed?.scheme == "about" else { return }
+            guard let self, (openers[id] != nil || linkOpened.contains(id)), committed == nil || committed?.scheme == "about" else { return }
             closeFromPage(id)
         }
     }
@@ -212,6 +220,7 @@ final class TabManager {
         if tab.webView.url == nil, let url = record.url {
             tab.load(.url(url))
         }
+        if tab.webView.url != nil { restored.insert(record.id) }
     }
 
     /// Keeps the page's place in its record and lets go of the web view.
@@ -222,6 +231,7 @@ final class TabManager {
         phases[id] = nil
         lastActive[id] = nil
         recordedTitles[id] = nil
+        restored.remove(id)
     }
 
     /// A page on its way back keeps what it had. It has no title yet, and WebKit's state for a page in mid-load

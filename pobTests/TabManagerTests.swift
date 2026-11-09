@@ -259,6 +259,53 @@ import WebKit
         }
         #expect(!modal)
     }
+    @Test func javaScriptDialogsNameTheSite() async throws {
+        let tab = await tabWith(html: "<p>x</p>") // https://localhost/
+        var seen: [NSAlert] = []
+        tab.alertSeam = { seen.append($0); return .alertFirstButtonReturn }
+        _ = try await tab.webView.evaluateJavaScript("alert('A'); confirm('B'); prompt('C'); 1")
+        #expect(seen.map(\.messageText) == Array(repeating: "localhost says", count: 3))
+        #expect(seen.map(\.informativeText) == ["A", "B", "C"])
+        let blank = Tab(profile: .temporary())
+        await finishLoading(blank) { blank.webView.loadHTMLString("<p>x</p>", baseURL: nil) }
+        seen = []
+        blank.alertSeam = { seen.append($0); return .alertFirstButtonReturn }
+        _ = try await blank.webView.evaluateJavaScript("alert('D'); 1")
+        #expect(seen.first?.messageText == "This page says" && seen.first?.informativeText == "D")
+    }
+    @Test func bringingATabBackIsntAVisit() async throws {
+        let server = LocalServer()
+        server.routes = ["/": .body(Data("<title>Home</title>".utf8), headers: ["Content-Type": "text/html"])]
+        try await server.start()
+        defer { server.stop() }
+        let profile = Profile.temporary()
+        await profile.history.record(url: server.url("/"), title: "Home")
+        let snapshot = WindowSnapshot(tabs: [TabRecord(url: server.url("/"))], activeIndex: 0, frame: "")
+        let tabs = TabManager(profile: profile, keepsSpare: false, restoring: snapshot)
+        let tab = try #require(tabs.activeTab)
+        await finishLoading(tab) {}
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(await profile.history.search("Home", limit: 5).first?.visitCount == 1)
+        await finishLoading(tab) { tab.webView.reload() }
+        #expect(await eventually { await profile.history.search("Home", limit: 5).first?.visitCount == 2 })
+    }
+    @Test func aCommandClickedDownloadLeavesNoBlankTab() async throws {
+        let server = LocalServer()
+        server.routes = [
+            "/": .body(Data("<a href=/file.zip>x</a>".utf8), headers: ["Content-Type": "text/html"]),
+            "/file.zip": .body(Data("zip".utf8), headers: ["Content-Type": "application/zip", "Content-Disposition": "attachment; filename=file.zip"]),
+        ]
+        try await server.start()
+        defer { server.stop() }
+        let tabs = manager()
+        let tab = tabs.newTab(nil, activate: true)
+        allowDownloads(tabs.profile.downloads)
+        await finishLoading(tab) { tab.load(.url(server.url("/"))) }
+        tab.webView(tab.webView, decidePolicyFor: FakeNavigationAction(url: server.url("/file.zip"), type: .linkActivated, modifiers: .command)) { _ in }
+        #expect(tabs.list.records.count == 2)
+        #expect(await eventually { tabs.list.records.count == 1 })
+        #expect(tabs.activeTab === tab)
+    }
     @Test func aBackgroundPageCantOpenAFilePanel() async throws {
         let tabs = manager()
         let page = await backgroundPage(in: tabs)
