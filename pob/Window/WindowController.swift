@@ -16,6 +16,8 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
     /// Replaceable because tests need history to answer late.
     var searchHistory: (String) async -> [HistoryEntry]
     var onTabsChanged: (() -> Void)?
+    /// The active page finished a load. `AppController` times launch by the first one.
+    var onActivePageFinished: (() -> Void)?
     var onClose: (() -> Void)?
     /// `AppController` owns the windows, and the switcher's New Window row starts here.
     var onNewWindow: (() -> Void)?
@@ -222,8 +224,14 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         case .selectTab8: tabs.activate(index: 7)
         case .selectTab9: tabs.activate(index: 8)
         case .openSwitcher, .openSwitcherFromPage:
+            let timing = Speed.signposter.beginInterval("Switcher")
             hideFindBar()
             openSwitcher()
+            // Ends a turn later with the panel laid out, so it covers what the next frame shows. Nothing waits for it.
+            DispatchQueue.main.async { [weak self] in
+                self?.window?.layoutIfNeeded()
+                Speed.signposter.endInterval("Switcher", timing)
+            }
         case .find:
             guard tab != nil else { return }
             findBar.isHidden = false
@@ -559,6 +567,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         tabs.onLoadFinished = { [weak self] finished in
             guard let self, finished === tab else { return }
             pill.show(url: finished.webView.url)
+            onActivePageFinished?()
         }
         tabs.onActiveProgress = { [weak self] in self?.loadingLine.update(progress: $0, isLoading: $1) }
         tabs.onActiveChange = { [weak self] in

@@ -52,6 +52,7 @@ final class AppController: NSObject, NSApplicationDelegate {
     /// Links that arrive before the session is back wait here, so a restored window isn't replaced.
     private var pendingLinks: [AddressInput] = []
     private var hasRestored = false
+    private var hasLoggedLaunch = false
     /// Still listed until their stores are gone, which can take seconds.
     private var deletingProfiles: Set<UUID> = []
     /// Every profile that has had a window, in the order they first did.
@@ -217,6 +218,9 @@ final class AppController: NSObject, NSApplicationDelegate {
             window.cascadeTopLeft(from: stepped)
         }
         controller.onTabsChanged = { [weak self] in self?.saveSessionSoon(profile) }
+        if snapshot != nil, !hasRestored { // a window the launch brings back
+            controller.onActivePageFinished = { [weak self] in self?.logLaunch() }
+        }
         controller.onNewWindow = { [weak self, weak controller] in
             self?.openWindow(restoring: nil, in: profile, cascadingFrom: controller?.window)
         }
@@ -254,6 +258,14 @@ final class AppController: NSObject, NSApplicationDelegate {
             controller.perform(.openSwitcher)
         }
         Task { profile.prepareSpareTab() } // no launch tab asked for one, and the first Return shouldn't wait
+    }
+
+    /// The spec's cold-launch target, read with `log show`. Only the first restored page counts.
+    private func logLaunch() {
+        guard !hasLoggedLaunch, let start = Speed.processStart() else { return }
+        hasLoggedLaunch = true
+        let ms = Int(Date.now.timeIntervalSince(start) * 1000)
+        Logger(subsystem: "pob", category: "Speed").log("Launch to first page: \(ms) ms")
     }
 
     /// A private profile isn't listed, so it keeps the name its window gave itself.

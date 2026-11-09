@@ -21,6 +21,11 @@ import Testing
         #expect(Profile.initial.id.uuidString == "6F0B5C2E-2F4B-4C6E-9B52-1F6B0A5D7C11")
         #expect(Profile.initial.directory.path().hasSuffix("pob/profiles/6F0B5C2E-2F4B-4C6E-9B52-1F6B0A5D7C11/"))
     }
+    /// The launch time is measured from here, so it has to be this process's start: before now, and not long before.
+    @Test func processStartIsThisProcesssStart() throws {
+        let start = try #require(Speed.processStart())
+        #expect(start < .now && start > .now - 3600)
+    }
     @Test func jsonFileRoundTripsAndCreatesFolders() throws {
         let url = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString).appending(path: "a.json")
         let file = JSONFile<[String]>(url: url)

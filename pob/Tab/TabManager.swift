@@ -74,10 +74,10 @@ final class TabManager {
     }
 
     func reopenLast() { changeList { _ = $0.reopenLast() } }
-    func activate(_ id: UUID) { changeList { $0.activate(id) } }
-    func activate(index: Int) { changeList { $0.activate(index: index) } }
-    func activateNext() { changeList { $0.activateNext() } }
-    func activatePrevious() { changeList { $0.activatePrevious() } }
+    func activate(_ id: UUID) { switchTab { $0.activate(id) } }
+    func activate(index: Int) { switchTab { $0.activate(index: index) } }
+    func activateNext() { switchTab { $0.activateNext() } }
+    func activatePrevious() { switchTab { $0.activatePrevious() } }
     func move(from: Int, to: Int) { changeList { $0.move(from: from, to: to) } }
 
     func updatePhases(now: Date, memoryPressure: Bool) {
@@ -184,6 +184,11 @@ final class TabManager {
             activate(opener)
         }
         close(id)
+    }
+
+    /// Timed to the window showing the page, through `onActiveChange`, and not to the page's load.
+    private func switchTab(_ change: (inout TabList) -> Void) {
+        Speed.signposter.withIntervalSignpost("Tab switch") { changeList(change) }
     }
 
     /// Every change to the list comes through here, so the live tabs and the window follow it.
