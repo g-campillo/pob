@@ -11,7 +11,6 @@ nonisolated enum BookmarkImport {
 
     static func parse(_ html: String) -> [Item] {
         let b = Array(html.utf8)
-        let tag = #/<[^>]*>/#
         var stack: [String?] = []
         var pending: String?
         var items: [Item] = []
@@ -35,9 +34,9 @@ nonisolated enum BookmarkImport {
             default:
                 let closing = Array((name == "a" ? "</a" : "</h3").utf8)
                 guard let end = find(closing, in: b, from: i) else { return items }
-                let inner = String(decoding: b[i..<end], as: UTF8.self)
+                let inner = String(decoding: strippingTags(b[i..<end]), as: UTF8.self)
                 i = end + closing.count
-                let text = decode(inner.replacing(tag, with: "")).collapsingWhitespace
+                let text = decode(inner).collapsingWhitespace
                 if name == "h3" {
                     pending = text
                 } else if let url = webURL(href(in: b[nameEnd..<gt])), let host = url.host() {
@@ -47,6 +46,19 @@ nonisolated enum BookmarkImport {
             }
         }
         return items
+    }
+
+    /// Drops each `<...>`; a `<` with no `>` after it drops everything from there on.
+    private static func strippingTags(_ bytes: ArraySlice<UInt8>) -> [UInt8] {
+        var out: [UInt8] = []
+        var i = bytes.startIndex
+        while i < bytes.endIndex {
+            guard let lt = bytes[i...].firstIndex(of: UInt8(ascii: "<")) else { out += bytes[i...]; break }
+            out += bytes[i..<lt]
+            guard let gt = bytes[lt...].firstIndex(of: UInt8(ascii: ">")) else { break }
+            i = gt + 1
+        }
+        return out
     }
 
     private static func isSpace(_ c: UInt8) -> Bool { c == 32 || (9...13).contains(c) }

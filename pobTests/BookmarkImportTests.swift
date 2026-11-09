@@ -69,6 +69,16 @@ import Testing
         #expect(elapsed < .seconds(1))
         #expect(BookmarkImport.parse("<a href=https://u.example/ >U</a><dl></dl></dl><a data-href='https://no.example/' href='https://q.example/'>&#x41;&#9999999999;</a>").map(\.title) == ["U", "A&#9999999999;"])
     }
+    @Test(arguments: ["<", "<b "]) func aTitleOfUnclosedTagsReadsInLinearTime(_ unit: String) {
+        let html = "<a href=\"https://x.example/\">" + String(repeating: unit, count: 1_000_000 / unit.count) + "</a>"
+        let clock = ContinuousClock()
+        let elapsed = clock.measure { _ = BookmarkImport.parse(html) }
+        #expect(elapsed < .seconds(1))
+    }
+    @Test func tagsInATitleAreStrippedAndAStrayAngleBracketEndsIt() {
+        #expect(BookmarkImport.parse(#"<a href="https://x.example/">A <b>bold</b> <i>t</i> x</a>"#).first?.title == "A bold t x")
+        #expect(BookmarkImport.parse(#"<a href="https://x.example/">Hi <b</a>"#).first?.title == "Hi")
+    }
     @Test func aHugeIconAttributeDoesntDropTheBookmark() {
         let icon = String(repeating: "A", count: 100_000)
         let items = BookmarkImport.parse("<DT><A HREF=\"https://big.example/\" ICON=\"data:image/png;base64,\(icon)\">Big</A>")
