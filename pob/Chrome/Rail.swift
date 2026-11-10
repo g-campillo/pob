@@ -4,6 +4,7 @@ import AppKit
 final class Rail: NSView, NSTextFieldDelegate {
     static let width: CGFloat = 240
     static let inset: CGFloat = 8
+    static let cornerRadius: CGFloat = 18
     /// What the rail takes from the window's left side, with a margin on each side of it.
     static let footprint = width + 2 * inset
 
@@ -123,7 +124,7 @@ final class Rail: NSView, NSTextFieldDelegate {
     }
 
     private func buildGlass() {
-        let content = addGlass(cornerRadius: 18)
+        let content = addGlass(cornerRadius: Self.cornerRadius)
         let stack = makeStack()
         content.addSubview(stack)
 

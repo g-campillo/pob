@@ -66,6 +66,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         // An empty toolbar moves the window buttons in from the corner, to where the rail's rounded corner clears them.
         window.toolbar = NSToolbar()
         window.toolbarStyle = .unified
+        PrivateAPI.setCornerRadius(window, Self.cornerRadius)
         window.minSize = NSSize(width: 480, height: 360)
         window.center()
         super.init(window: window)
@@ -145,6 +146,19 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
     func windowWillClose(_ notification: Notification) {
         isClosed = true
         onClose?()
+    }
+
+    /// The rail's corner plus its margin, so the two curves run side by side.
+    private static let cornerRadius = Rail.cornerRadius + Rail.inset
+
+    /// A full-screen window fills the display, and round corners there would show what's behind it.
+    /// Zero hands the corners back to the system, which knows what full screen needs.
+    func windowWillEnterFullScreen(_ notification: Notification) {
+        window.map { _ = PrivateAPI.setCornerRadius($0, 0) }
+    }
+
+    func windowWillExitFullScreen(_ notification: Notification) {
+        window.map { _ = PrivateAPI.setCornerRadius($0, Self.cornerRadius) }
     }
 
     func applyAppearance() {

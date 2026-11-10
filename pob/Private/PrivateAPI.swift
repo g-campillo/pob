@@ -21,6 +21,13 @@ enum PrivateAPI {
         return setRadius(connection, window.windowNumber, Int32(radius)) == 0
     }
 
+    /// Rounds the window itself, so its blur, shadow and edge all follow the corner. Clipping the content couldn't
+    /// move the blur. False when a macOS update has taken the setter away, and the window keeps the system's corners.
+    @discardableResult
+    static func setCornerRadius(_ window: NSWindow, _ radius: CGFloat) -> Bool {
+        setValue(radius, forKey: "cornerRadius", setter: "_setCornerRadius:", on: window)
+    }
+
     static func setDrawsBackground(_ webView: WKWebView, _ draws: Bool) {
         setValue(draws, forKey: "drawsBackground", setter: "_setDrawsBackground:", on: webView)
     }

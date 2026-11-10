@@ -8,6 +8,11 @@ import WebKit
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
         #expect(PrivateAPI.setWindowBlur(window, radius: 10))
     }
+    @Test func cornerRadiusWorksOnARealWindow() {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 100, height: 100), styleMask: [.titled], backing: .buffered, defer: false)
+        #expect(PrivateAPI.setCornerRadius(window, 26))
+        #expect(window.value(forKey: "cornerRadius") as? CGFloat == 26)
+    }
     @Test func inspectorAPIsStillExist() {
         let configuration = WKWebViewConfiguration()
         PrivateAPI.enableDeveloperExtras(configuration)

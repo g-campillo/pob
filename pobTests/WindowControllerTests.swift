@@ -44,6 +44,23 @@ import WebKit
             #expect(rail.insetBy(dx: 8, dy: 8).contains(button.convert(button.bounds, to: nil)), "\(type.rawValue)")
         }
     }
+    /// The rail sits 8 pt inside the window, so the window's corner is that much rounder and the two curves run side by side.
+    @Test func theWindowsCornersAreConcentricWithTheRails() throws {
+        let (controller, _) = make()
+        let window = try #require(controller.window)
+        #expect(window.value(forKey: "cornerRadius") as? CGFloat == Rail.cornerRadius + Rail.inset)
+    }
+    /// A full-screen window fills the display, and pob's round corners there would show what's behind it.
+    /// This window isn't really full screen, so the system's answer is its ordinary corner.
+    @Test func fullScreenHandsTheCornersBackToTheSystemAndLeavingItRoundsThemAgain() throws {
+        let (controller, _) = make()
+        let window = try #require(controller.window)
+        let plain = NSWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: false)
+        NotificationCenter.default.post(name: NSWindow.willEnterFullScreenNotification, object: window)
+        #expect(window.value(forKey: "cornerRadius") as? CGFloat == plain.value(forKey: "cornerRadius") as? CGFloat)
+        NotificationCenter.default.post(name: NSWindow.willExitFullScreenNotification, object: window)
+        #expect(window.value(forKey: "cornerRadius") as? CGFloat == Rail.cornerRadius + Rail.inset)
+    }
     @Test func theNavigationButtonsLineUpWithTheWindowButtons() throws {
         let (controller, _) = make()
         let window = try #require(controller.window)
