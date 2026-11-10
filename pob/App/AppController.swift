@@ -86,6 +86,13 @@ final class AppController: NSObject, NSApplicationDelegate {
     }
 
     static func main() {
+        // With a mouse attached, macOS gives every scroll bar a gutter of its own beside the page. This makes them
+        // float over it and show only while scrolling. The argument domain outranks System Settings and isn't saved,
+        // and what was passed at launch is kept.
+        var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        arguments["AppleShowScrollBars"] = "WhenScrolling"
+        UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+
         let application = NSApplication.shared
         let controller = AppController()
         application.delegate = controller
