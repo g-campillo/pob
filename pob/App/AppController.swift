@@ -22,6 +22,9 @@ final class AppController: NSObject, NSApplicationDelegate {
     var makeProfile: (UUID) -> Profile = { Profile.persistent(id: $0) }
     /// Replaceable so a test can't change the Mac's default browser.
     var requestDefault: (String) async throws -> Void = {
+        // The test host has pob's bundle id, so a test that forgets to replace this would have macOS ask the user
+        // to change browsers, or hang on the alert when macOS refuses. Two tests run every command and did both.
+        guard await !AppController.isRunningTests else { return }
         try await NSWorkspace.shared.setDefaultApplication(at: Bundle.main.bundleURL, toOpenURLsWithScheme: $0)
     }
     /// Replaceable so a test never removes a real store. WebKit refuses until the last page of a dropped store has
