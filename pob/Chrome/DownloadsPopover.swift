@@ -132,7 +132,7 @@ final class DownloadsPopover: NSViewController {
     private var itemsByButton: [ObjectIdentifier: DownloadItem] = [:]
 
     private func button(_ title: String, _ action: Selector, _ item: DownloadItem) -> NSButton {
-        let button = NSButton(title: title, target: self, action: action)
+        let button = HoverButton(title: title, target: self, action: action)
         button.bezelStyle = .accessoryBarAction
         button.setAccessibilityLabel("\(title), \(item.filename)")
         itemsByButton[ObjectIdentifier(button)] = item

@@ -34,6 +34,13 @@ import WebKit
         }
     }
 
+    /// A text field's own background is a square box.
+    @Test func theFindFieldSitsOnARoundedFill() {
+        let bar = FindBar()
+        #expect(!bar.field.drawsBackground)
+        #expect(bar.subviewsDeep.contains { $0 is ActiveFill })
+    }
+
     // MARK: Menu
 
     @Test func hiddenPlusItemSurvivesAndZoomsIn() throws {

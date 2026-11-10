@@ -15,10 +15,12 @@ final class FindBar: NSView, NSTextFieldDelegate {
         super.init(frame: frame)
         let content = addGlass(cornerRadius: 14)
 
-        // The field sits on glass, so it is a plain fill.
+        // The field sits on glass, so it gets a plain fill. Its own background would be a square box.
+        let fill = ActiveFill()
+        fill.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(fill)
         field.isBordered = false
-        field.drawsBackground = true
-        field.backgroundColor = NSColor.labelColor.withAlphaComponent(0.08)
+        field.drawsBackground = false
         field.focusRingType = .none
         field.placeholderString = "Find on page"
         field.cell?.usesSingleLineMode = true
@@ -34,12 +36,16 @@ final class FindBar: NSView, NSTextFieldDelegate {
             content.addSubview(subview)
         }
         NSLayoutConstraint.activate([
-            field.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 10),
+            fill.leadingAnchor.constraint(equalTo: field.leadingAnchor, constant: -6),
+            fill.trailingAnchor.constraint(equalTo: field.trailingAnchor, constant: 6),
+            fill.topAnchor.constraint(equalTo: field.topAnchor, constant: -5),
+            fill.bottomAnchor.constraint(equalTo: field.bottomAnchor, constant: 5),
+            field.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 14),
             field.centerYAnchor.constraint(equalTo: content.centerYAnchor),
             notFoundLabel.leadingAnchor.constraint(equalTo: field.trailingAnchor, constant: 8),
             notFoundLabel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
             notFoundLabel.centerYAnchor.constraint(equalTo: content.centerYAnchor),
-            field.widthAnchor.constraint(equalToConstant: 170),
+            field.widthAnchor.constraint(equalToConstant: 162),
         ])
     }
 

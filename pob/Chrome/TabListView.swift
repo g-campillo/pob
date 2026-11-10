@@ -54,7 +54,7 @@ final class TabListView: NSView, NSTableViewDataSource, NSTableViewDelegate {
         scroll.autohidesScrollers = true
         scroll.scrollerStyle = .overlay
 
-        let newTab = NSButton(title: "New Tab", image: NSImage(systemSymbolName: "plus", accessibilityDescription: nil) ?? NSImage(), target: self, action: #selector(newTabPressed))
+        let newTab = HoverButton(title: "New Tab", image: NSImage(systemSymbolName: "plus", accessibilityDescription: nil) ?? NSImage(), target: self, action: #selector(newTabPressed))
         newTab.isBordered = false
         newTab.imagePosition = .imageLeading
         newTab.alignment = .left
@@ -90,7 +90,20 @@ final class TabListView: NSView, NSTableViewDataSource, NSTableViewDelegate {
                 host: host, favicon: host.flatMap { favicons?.image(forHost: $0) }
             )
         }
-        if rows.map(\.id) != previous.map(\.id) {
+        if rows.map(\.id) != previous.map(\.id), Motion.isOn {
+            // Rows fade and slide in and out. The difference lists removals first, from the bottom up, as the table wants them.
+            table.beginUpdates()
+            for change in rows.map(\.id).difference(from: previous.map(\.id)) {
+                switch change {
+                case .remove(let offset, _, _): table.removeRows(at: [offset], withAnimation: [.effectFade, .slideUp])
+                case .insert(let offset, _, _): table.insertRows(at: [offset], withAnimation: [.effectFade, .slideDown])
+                }
+            }
+            table.endUpdates()
+            for index in rows.indices { // a row that stayed may no longer be the active one
+                (table.view(atColumn: 0, row: index, makeIfNecessary: false) as? TabRow)?.configure(rows[index])
+            }
+        } else if rows.map(\.id) != previous.map(\.id) {
             table.reloadData()
         } else {
             for index in rows.indices where rows[index] != previous[index] {
@@ -169,9 +182,19 @@ final class ClickOnlyTable: NSTableView {
     override var acceptsFirstResponder: Bool { false }
 }
 
-/// Marks a row on glass. Set `wantsLayer`, and the color follows the appearance.
+/// Marks a row or a field on glass. The color follows the appearance.
 final class ActiveFill: NSView {
-    override var cornerConfiguration: NSViewCornerConfiguration { .uniformCorners(radius: .containerConcentric(6)) }
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        // Set on the layer, because a corner configuration alone left the fill square.
+        layer?.cornerRadius = 8
+        layer?.cornerCurve = .continuous
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
     override var wantsUpdateLayer: Bool { true }
 
     override func updateLayer() {
@@ -186,12 +209,10 @@ private final class TabRow: NSView {
     private let fill = ActiveFill()
     private let tile = NSImageView()
     private let label = NSTextField(labelWithString: "")
-    private let closeButton = NSButton()
+    private let closeButton = HoverButton()
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        fill.wantsLayer = true
-
         tile.imageScaling = .scaleProportionallyUpOrDown
 
         label.lineBreakMode = .byTruncatingTail
@@ -243,7 +264,11 @@ private final class TabRow: NSView {
     override func prepareForReuse() {
         super.prepareForReuse()
         closeButton.alphaValue = 0
+        closeButton.resetHover()
     }
+
+    /// The whole row is a click target.
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -251,8 +276,8 @@ private final class TabRow: NSView {
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
     }
 
-    override func mouseEntered(with event: NSEvent) { closeButton.alphaValue = 1 }
-    override func mouseExited(with event: NSEvent) { closeButton.alphaValue = 0 }
+    override func mouseEntered(with event: NSEvent) { Motion.animate(Motion.fadeIn) { closeButton.alphaValue = 1 } }
+    override func mouseExited(with event: NSEvent) { Motion.animate(Motion.fadeOut) { closeButton.alphaValue = 0 } }
 
     @objc private func closePressed() { onClose?() }
 }

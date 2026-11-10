@@ -66,6 +66,31 @@ import Testing
         return view
     }
 
+    @Test func theActiveRowsFillHasRoundedCorners() throws {
+        let record = TabRecord(title: "One")
+        let row = try #require(rowViews(in: listShowing([record], active: record.id)).first)
+        let fill = try #require(row.subviews.first { $0 is ActiveFill })
+        #expect((fill.layer?.cornerRadius ?? 0) >= 6)
+    }
+
+    /// With Smooth on the rows are moved, not reloaded, and a row that stays has to be told who's active now.
+    @Test func smoothRowChangesLeaveTheRowsMatchingTheTabs() throws {
+        let (one, two, three) = (TabRecord(title: "One"), TabRecord(title: "Two"), TabRecord(title: "Three"))
+        let view = listShowing([one, two], active: one.id)
+        try withMotion(.smooth) {
+            view.update(records: [two, three], activeID: two.id)
+            var rows = try rowViews(in: view)
+            #expect(rows.map(title(of:)) == ["Two", "Three"])
+            #expect(rows.map(hasFill) == [true, false])
+            view.update(records: [three, two, one], activeID: one.id)
+            rows = try rowViews(in: view)
+            #expect(rows.map(title(of:)) == ["Three", "Two", "One"])
+            #expect(rows.map(hasFill) == [false, false, true])
+            view.update(records: [], activeID: nil)
+            #expect(view.rowCount == 0)
+        }
+    }
+
     /// Every tab's every change arrives here, and a reload would take the hover off whatever the pointer is on.
     @Test func anUpdateWithNothingNewToShowLeavesTheRowsAlone() throws {
         var records = [TabRecord(url: URL(string: "https://one.example/a"), title: "One"), TabRecord(title: "Two")]

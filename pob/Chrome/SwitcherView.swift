@@ -14,6 +14,8 @@ final class SwitcherView: NSView, NSTextFieldDelegate {
     let field: NSTextField = LiteralTextField()
     let list = SwitcherList(selectsFirstRow: true)
     private let listHeight: NSLayoutConstraint
+    private let dimming = NSView()
+    private let panel = NSView()
     private let pageArea = NSLayoutGuide()
     private lazy var pageLeading = pageArea.leadingAnchor.constraint(equalTo: leadingAnchor)
 
@@ -23,12 +25,19 @@ final class SwitcherView: NSView, NSTextFieldDelegate {
         set { pageLeading.constant = newValue }
     }
 
+    /// Off in a window with no page. There's nothing to dim, and a click beside the panel goes to whatever is there.
+    var dimsPage = true {
+        didSet { dimming.isHidden = !dimsPage }
+    }
+    /// Not `isHidden`, which stays false while the panel fades out.
+    private(set) var isOpen = false
+
     override init(frame: NSRect) {
         listHeight = list.heightAnchor.constraint(equalToConstant: 0)
         super.init(frame: frame)
         list.onChoose = { [weak self] in self?.onChoose?($0) }
 
-        let dimming = NSView(frame: bounds)
+        dimming.frame = bounds
         dimming.autoresizingMask = [.width, .height]
         dimming.wantsLayer = true
         dimming.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.22).cgColor
@@ -36,7 +45,6 @@ final class SwitcherView: NSView, NSTextFieldDelegate {
         addSubview(dimming)
 
         addLayoutGuide(pageArea)
-        let panel = NSView()
         panel.translatesAutoresizingMaskIntoConstraints = false
         addSubview(panel)
         let content = panel.addGlass(cornerRadius: Self.panelCornerRadius)
@@ -83,12 +91,27 @@ final class SwitcherView: NSView, NSTextFieldDelegate {
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
 
-    /// Starts a new search with the keyboard in the field. Nothing here animates, so typing can start at once.
+    /// Starts a new search with the keyboard in the field. It gets there before anything moves, so typing can start at once.
     func open() {
         field.stringValue = ""
         list.clearPick()
-        isHidden = false
+        isOpen = true
+        setShown(true, scales: false)
+        panel.grow()
         focus()
+    }
+
+    /// Takes the panel off the screen. Giving the keyboard back is the window's job.
+    func close() {
+        isOpen = false
+        panel.shrink()
+        setShown(false, scales: false)
+    }
+
+    /// Only the dimming and the panel take clicks, and neither does while they fade out.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard isOpen, let hit = super.hitTest(point), hit !== self else { return nil }
+        return hit
     }
 
     func show(rows: [SwitcherRow]) {
@@ -277,7 +300,6 @@ private final class SwitcherRowBackground: NSTableRowView {
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        fill.wantsLayer = true
         fill.isHidden = true
         fill.frame = bounds
         fill.autoresizingMask = [.width, .height]
@@ -321,7 +343,17 @@ private final class SwitcherCell: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
 
+    /// A row is a click target. A header isn't.
+    private var isHeader = false {
+        didSet { window?.invalidateCursorRects(for: self) }
+    }
+
+    override func resetCursorRects() {
+        if !isHeader { addCursorRect(bounds, cursor: .pointingHand) }
+    }
+
     func configure(header: String) {
+        isHeader = true
         title.stringValue = header
         title.font = .preferredFont(forTextStyle: .caption1)
         title.textColor = .secondaryLabelColor
@@ -330,6 +362,7 @@ private final class SwitcherCell: NSView {
     }
 
     func configure(row: SwitcherRow) {
+        isHeader = false
         title.stringValue = row.title
         title.font = .preferredFont(forTextStyle: .body)
         title.textColor = .labelColor

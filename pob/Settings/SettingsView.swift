@@ -9,7 +9,11 @@ struct SettingsView: View {
                 Picker("Search Engine", selection: $model.searchEngine) {
                     ForEach(SearchEngine.allCases) { Text($0.name).tag($0) }
                 }
+                Picker("Animations", selection: $model.motion) {
+                    ForEach(MotionStyle.allCases) { Text($0.name).tag($0) }
+                }
                 Button("Make pob the Default Browser") { model.makeDefaultBrowser() }
+                    .pointerStyle(.link)
             }
             Section("Profiles") {
                 List(model.profiles, selection: $model.selectedProfileID) { profile in
@@ -17,6 +21,7 @@ struct SettingsView: View {
                 }
                 .frame(height: 160)
                 Button("New Profile") { model.addProfile() }
+                    .pointerStyle(.link)
             }
             if let profile = model.profiles.first(where: { $0.id == model.selectedProfileID }) {
                 ProfileData(model: model, profile: profile)
@@ -57,12 +62,14 @@ private struct ProfileData: View {
                         model.turnBlockingBackOn(host, in: profile.id)
                         sites = model.sitesWithBlockingOff(of: profile.id)
                     }
+                    .pointerStyle(.link)
                 }
             }
         }
         .onChange(of: appearsActive, initial: true) { sites = model.sitesWithBlockingOff(of: profile.id) }
         Section {
             Button("Clear History…") { confirmsClear = true }
+                .pointerStyle(.link)
                 .confirmationDialog("Clear all history for \(profile.name)?", isPresented: $confirmsClear, titleVisibility: .visible) {
                     Button("Clear History", role: .destructive) {
                         Task { await model.clearHistory(of: profile.id) }
@@ -71,6 +78,7 @@ private struct ProfileData: View {
             VStack(alignment: .leading) {
                 Button("Delete Profile…", role: .destructive) { confirmsDelete = true }
                     .disabled(deleteCaption != nil)
+                    .pointerStyle(deleteCaption == nil ? .link : .default)
                 if let deleteCaption {
                     Text(deleteCaption).font(.caption).foregroundStyle(.secondary)
                 }

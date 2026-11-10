@@ -7,6 +7,9 @@ import Observation
     var searchEngine: SearchEngine {
         didSet { appearance.searchEngine = searchEngine }
     }
+    var motion: MotionStyle {
+        didSet { appearance.motion = motion }
+    }
     var selectedProfileID: UUID?
     /// So Settings redraws while a delete runs. `AppController` keeps its own guard.
     private(set) var deleting: Set<UUID> = []
@@ -25,6 +28,7 @@ import Observation
         self.appearance = appearance
         self.profiles = profiles.all
         searchEngine = appearance.searchEngine
+        motion = appearance.motion
         profiles.addObserver { [weak self] in
             guard let self else { return }
             self.profiles = list.all

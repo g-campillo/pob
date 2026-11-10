@@ -22,7 +22,7 @@ final class Rail: NSView, NSTextFieldDelegate {
     let tabList = TabListView()
     let suggestions = SwitcherList(selectsFirstRow: false)
     let pinned = PinnedBookmarksView()
-    let profileButton = NSButton(title: "", target: nil, action: nil)
+    let profileButton: NSButton = HoverButton(title: "", target: nil, action: nil)
     private(set) lazy var settingsButton = iconButton("gearshape", label: "Settings", action: #selector(settingsPressed))
 
     private(set) lazy var downloadsButton = iconButton("arrow.down.circle", label: "Downloads", action: #selector(downloadsPressed))
@@ -65,8 +65,9 @@ final class Rail: NSView, NSTextFieldDelegate {
     /// Rows replace the tab list. With none, the tab list comes back.
     func showSuggestions(_ rows: [SwitcherRow]) {
         suggestions.show(rows)
-        suggestions.isHidden = rows.isEmpty
-        tabList.isHidden = !rows.isEmpty
+        let (incoming, outgoing) = rows.isEmpty ? (tabList, suggestions) : (suggestions, tabList)
+        outgoing.isHidden = true // it takes no space in the stack, so the incoming list fades into its place
+        incoming.setShown(true, scales: false)
     }
 
     override func updateTrackingAreas() {
@@ -129,7 +130,7 @@ final class Rail: NSView, NSTextFieldDelegate {
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 10),
             stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -10),
-            stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 8),
+            stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 4), // centers the top row on the window buttons
             stack.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -10),
         ])
     }
@@ -210,7 +211,7 @@ final class Rail: NSView, NSTextFieldDelegate {
 
     private func iconButton(_ symbol: String, label: String, action: Selector) -> NSButton {
         let image = NSImage(systemSymbolName: symbol, accessibilityDescription: label) ?? NSImage()
-        let button = NSButton(image: image, target: self, action: action)
+        let button = HoverButton(image: image, target: self, action: action)
         button.isBordered = false
         button.setAccessibilityLabel(label)
         button.widthAnchor.constraint(equalToConstant: 28).isActive = true
@@ -325,7 +326,7 @@ final class PinnedBookmarksView: NSView {
         for (index, bookmark) in bookmarks.enumerated() {
             let icon = favicons[index] ?? FaviconStore.letterTile(for: bookmark.url.host() ?? bookmark.title, size: 20)
             icon.size = NSSize(width: 20, height: 20)
-            let button = NSButton(image: icon, target: self, action: #selector(pressed(_:)))
+            let button = HoverButton(image: icon, target: self, action: #selector(pressed(_:)))
             button.isBordered = false
             button.refusesFirstResponder = true
             button.tag = index

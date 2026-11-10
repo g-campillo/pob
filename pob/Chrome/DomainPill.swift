@@ -92,8 +92,12 @@ final class DomainPill: NSView {
         guard !isSuppressed else { return hide(animated: false) }
         fadeGeneration += 1
         label.stringValue = text
-        alphaValue = 1
+        let fadesIn = isHidden && !reducesMotion()
+        alphaValue = fadesIn ? 0 : 1
         isHidden = false
+        if fadesIn {
+            Motion.animate(Motion.fadeIn) { alphaValue = 1 }
+        }
         scheduleHide(after: duration, holdsOnHover: holdsOnHover)
     }
 
@@ -109,7 +113,7 @@ final class DomainPill: NSView {
     }
 
     /// Replaceable because the fade's completion never fires while the display is asleep, so tests take the instant path.
-    var reducesMotion: () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+    var reducesMotion: () -> Bool = { !Motion.isOn }
 
     private func hide(animated: Bool) {
         hideTask?.cancel()
@@ -140,6 +144,8 @@ final class DomainPill: NSView {
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
 
     override func mouseDown(with event: NSEvent) {
         guard currentURL != nil else { return }

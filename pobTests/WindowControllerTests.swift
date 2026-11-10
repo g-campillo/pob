@@ -32,6 +32,27 @@ import WebKit
         let (controller, _) = make()
         #expect(controller.window?.standardWindowButton(.closeButton)?.isHidden == true)
     }
+    /// The rail's rounded corner used to cut through the close button.
+    @Test func theWindowButtonsSitInsideTheRailsCorner() throws {
+        let (controller, _) = make()
+        let window = try #require(controller.window)
+        controller.perform(.toggleRail)
+        window.layoutIfNeeded()
+        let rail = controller.rail.convert(controller.rail.bounds, to: nil)
+        for type in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            let button = try #require(window.standardWindowButton(type))
+            #expect(rail.insetBy(dx: 8, dy: 8).contains(button.convert(button.bounds, to: nil)), "\(type.rawValue)")
+        }
+    }
+    @Test func theNavigationButtonsLineUpWithTheWindowButtons() throws {
+        let (controller, _) = make()
+        let window = try #require(controller.window)
+        controller.perform(.toggleRail)
+        window.layoutIfNeeded()
+        let close = try #require(window.standardWindowButton(.closeButton))
+        let back = try #require(controller.rail.subviewsDeep.compactMap { $0 as? NSButton }.first { $0.accessibilityLabel() == "Back" })
+        #expect(abs(back.convert(back.bounds, to: nil).midY - close.convert(close.bounds, to: nil).midY) <= 1)
+    }
     @Test func appearanceDrivesThePage() throws {
         let (controller, model) = make()
         let webView = try #require(controller.tab?.webView)

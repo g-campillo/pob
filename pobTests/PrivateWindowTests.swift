@@ -13,6 +13,27 @@ import Testing
         #expect(!hidden.dataStore.isPersistent)
         #expect(Profile.makePrivate(from: hidden).parent === parent)
     }
+    /// The rail names a private window, but the rail hides. The badge doesn't.
+    @Test func aPrivateWindowKeepsItsBadgeWhateverTheRailDoes() {
+        let tabs = TabManager(profile: .makePrivate(from: .temporary()), keepsSpare: false)
+        tabs.newTab(nil, activate: true)
+        let controller = WindowController(appearance: testAppearance(), tabs: tabs)
+        #expect(!controller.privateBadge.isHidden)
+        #expect(controller.privateBadge.superview === controller.window?.contentView)
+        controller.perform(.toggleRail)
+        controller.perform(.toggleRail)
+        controller.perform(.openSwitcher)
+        #expect(!controller.privateBadge.isHidden)
+        #expect(controller.privateBadge.accessibilityLabel() == "Private window")
+    }
+    @Test func anOrdinaryWindowHasNoBadge() {
+        let tabs = TabManager(profile: .temporary(), keepsSpare: false)
+        #expect(WindowController(appearance: testAppearance(), tabs: tabs).privateBadge.isHidden)
+    }
+    @Test func theBadgeNeverTakesClicks() {
+        let badge = PrivateBadge(frame: NSRect(x: 0, y: 0, width: 26, height: 26))
+        #expect(badge.hitTest(NSPoint(x: 13, y: 13)) == nil)
+    }
     /// A real page through real WebKit, because history and icons are written from WebKit's callbacks.
     @Test func browsingPrivatelyLeavesNothingBehind() async throws {
         let server = LocalServer()

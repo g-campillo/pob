@@ -29,6 +29,15 @@ final class AppearanceModel {
         }
     }
 
+    /// Saved at once, like the engine.
+    var motion: MotionStyle {
+        get { storedSettings.motion ?? .smooth }
+        set {
+            storedSettings.motion = newValue
+            do { try persist() } catch { NSLog("pob could not save settings: \(error)") }
+        }
+    }
+
     var reduceTransparency: Bool {
         didSet { notify() }
     }

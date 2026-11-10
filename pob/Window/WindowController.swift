@@ -11,6 +11,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
     let pill = DomainPill()
     let findBar = FindBar()
     let loadingLine = LoadingLine()
+    let privateBadge = PrivateBadge()
     private(set) var usesFallbackBlur = false
     private(set) var railState = RailState()
     /// Replaceable because tests need history to answer late.
@@ -34,11 +35,13 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
     private var blurGate = BlurGate()
     private var fallbackBlurView: NSVisualEffectView?
     private let edgeStrip = EdgeStrip()
-    private var railLeading: NSLayoutConstraint?
+    /// Where the rail is headed, which its frame only reaches once a slide ends.
+    private var railIsOut = false
     private var railCloseTask: Task<Void, Never>?
     private(set) var openPopover: NSPopover?
     private var historySearch: Task<Void, Never>?
     private var shownHistory: [HistoryEntry] = []
+    private var isClosed = false
     private lazy var commands = CommandList.standard { [weak self] in self?.perform($0) }
 
     init(appearance: AppearanceModel, tabs: TabManager) {
@@ -60,6 +63,9 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         window.hasShadow = true
+        // An empty toolbar moves the window buttons in from the corner, to where the rail's rounded corner clears them.
+        window.toolbar = NSToolbar()
+        window.toolbarStyle = .unified
         window.minSize = NSSize(width: 480, height: 360)
         window.center()
         super.init(window: window)
@@ -137,6 +143,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
     }
 
     func windowWillClose(_ notification: Notification) {
+        isClosed = true
         onClose?()
     }
 
@@ -193,7 +200,13 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
     }
 
     func perform(_ id: CommandID) {
-        if !switcher.isHidden, id != .openSwitcher, id != .openSwitcherFromPage {
+        // The switcher's field is the address field of a window with no page.
+        let id = tabs.isEmpty && id == .focusAddress ? .openSwitcher : id
+        // That window has nothing else to show, so whatever the command closed, the switcher comes back.
+        defer {
+            if tabs.isEmpty, !switcher.isOpen, !isClosed { openSwitcher() }
+        }
+        if switcher.isOpen, id != .openSwitcher, id != .openSwitcherFromPage {
             // Commands act on the window, and several of them move the keyboard, so the panel can't stay up over them.
             closeSwitcher()
             // ⌘T says New Tab, so ⌘T then ⌘W means "never mind", not "close the page behind it". With no page, it closes the window.
@@ -234,7 +247,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
             }
         case .find:
             guard tab != nil else { return }
-            findBar.isHidden = false
+            findBar.setShown(true)
             findBar.focus()
         case .print: tab?.printPage()
         case .zoomIn: tab?.zoomIn()
@@ -296,36 +309,42 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
 
     func applyRailState(animated: Bool = true) {
         let isVisible = railState.visibility != .hidden
+        let moves = isVisible != railIsOut
+        railIsOut = isVisible
         setWindowButtonsVisible(isVisible)
         applyPageStyle()
         switcher.pageInset = isVisible ? Rail.footprint : 0
         pill.isSuppressed = isVisible
 
-        if isVisible {
-            rail.isHidden = false
-        }
-        let leading = isVisible ? Rail.inset : -(Rail.width + Rail.inset)
-        guard animated, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
-            railLeading?.constant = leading
+        let x = isVisible ? Rail.inset : -(Rail.width + Rail.inset)
+        guard animated, Motion.isOn else {
+            rail.frame.origin.x = x // set directly, which also stops a slide still running
+            windowButtons.forEach { $0.alphaValue = 1 }
             rail.isHidden = !isVisible
             return
         }
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.17
-            context.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            railLeading?.animator().constant = leading
-        } completionHandler: { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self, self.railState.visibility == .hidden else { return }
-                self.rail.isHidden = true
-            }
+        guard moves else { return } // already on its way, and starting again would end that slide early
+        rail.isHidden = false
+        if isVisible {
+            windowButtons.forEach { $0.alphaValue = 0 }
         }
+        // Only a slide out ends by hiding the rail. One cut short by a slide in reports its end too, at once.
+        let hide: (() -> Void)? = isVisible ? nil : { [weak self] in
+            guard let self, !railIsOut else { return }
+            rail.isHidden = true
+        }
+        Motion.animate(Motion.spring, {
+            rail.frame.origin.x = x
+            windowButtons.forEach { $0.alphaValue = 1 }
+        }, completion: hide)
+    }
+
+    private var windowButtons: [NSButton] {
+        [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton].compactMap { window?.standardWindowButton($0) }
     }
 
     func setWindowButtonsVisible(_ visible: Bool) {
-        for button in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
-            window?.standardWindowButton(button)?.isHidden = !visible
-        }
+        windowButtons.forEach { $0.isHidden = !visible }
     }
 
     private func buildContent(in window: NSWindow) {
@@ -362,20 +381,24 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
             pill.widthAnchor.constraint(lessThanOrEqualTo: contentView.widthAnchor, multiplier: 0.6),
         ])
 
-        rail.translatesAutoresizingMaskIntoConstraints = false
+        privateBadge.translatesAutoresizingMaskIntoConstraints = false
+        privateBadge.isHidden = !tabs.profile.isPrivate
+        contentView.addSubview(privateBadge)
+        NSLayoutConstraint.activate([
+            privateBadge.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
+            privateBadge.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12),
+        ])
+
+        // Placed by its frame, because a frame slides on the spring and a constraint doesn't.
+        rail.frame = NSRect(
+            x: -(Rail.width + Rail.inset),
+            y: Rail.inset,
+            width: Rail.width,
+            height: contentView.bounds.height - 2 * Rail.inset
+        )
+        rail.autoresizingMask = [.height]
         rail.isHidden = true
         contentView.addSubview(rail)
-        let leading = rail.leadingAnchor.constraint(
-            equalTo: contentView.leadingAnchor,
-            constant: -(Rail.width + Rail.inset)
-        )
-        railLeading = leading
-        NSLayoutConstraint.activate([
-            leading,
-            rail.widthAnchor.constraint(equalToConstant: Rail.width),
-            rail.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Rail.inset),
-            rail.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Rail.inset),
-        ])
 
         edgeStrip.frame = NSRect(x: 0, y: 0, width: EdgeStrip.width, height: contentView.bounds.height)
         edgeStrip.autoresizingMask = [.height]
@@ -442,6 +465,9 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
     /// The rail leaves a field being edited alone, so the address can only come back once the keyboard has moved.
     private func leaveAddressField() {
         window?.makeFirstResponder(tab?.webView)
+        if tab == nil, switcher.isOpen { // no page to take the keyboard, so it goes back to the switcher
+            switcher.focus()
+        }
         updateRailContents()
     }
 
@@ -474,7 +500,10 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
 
     private func connectSwitcher() {
         switcher.onChoose = { [weak self] in self?.chooseInSwitcher($0) }
-        switcher.onCancel = { [weak self] in self?.closeSwitcher() }
+        switcher.onCancel = { [weak self] in
+            guard let self, !tabs.isEmpty else { return } // with no page behind it, the switcher is all the window has
+            closeSwitcher()
+        }
         switcher.onQueryChange = { [weak self] in self?.searchInSwitcher($0) }
     }
 
@@ -493,12 +522,13 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
     }
 
     private func hideFindBar() {
-        findBar.isHidden = true
+        findBar.setShown(false)
         findBar.showResult(found: true)
     }
 
     private func openSwitcher() {
-        guard switcher.isHidden else {
+        switcher.dimsPage = !tabs.isEmpty
+        guard !switcher.isOpen else {
             switcher.focus()
             return
         }
@@ -508,13 +538,13 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
 
     /// A link from outside opens as the active tab, and the switcher a fresh window opens with has no business over it.
     func openLink(_ input: AddressInput) {
-        if !switcher.isHidden { closeSwitcher() }
+        if switcher.isOpen { closeSwitcher() }
         tabs.newTab(input, activate: true)
     }
 
     private func closeSwitcher() {
         window?.makeFirstResponder(tab?.webView)
-        switcher.isHidden = true
+        switcher.close()
     }
 
     private func chooseInSwitcher(_ row: SwitcherRow) {
@@ -575,6 +605,8 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
             showActiveTab()
             if tabs.isEmpty { // the window owns what ⇧⌘T brings back, so it stays, and the next ⌘W closes it
                 perform(.openSwitcher)
+            } else if switcher.isOpen, !switcher.dimsPage { // it was only up because the window was empty
+                closeSwitcher()
             }
         }
     }
@@ -591,7 +623,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
             tab.pageView.alphaValue = 1
             tab.pageView.frame = contentView.bounds
             contentView.addSubview(tab.pageView, positioned: .below, relativeTo: topStrip)
-            if switcher.isHidden { // a page coming forward behind the panel mustn't catch what's being typed
+            if !switcher.isOpen { // a page coming forward behind the panel mustn't catch what's being typed
                 window?.makeFirstResponder(tab.webView)
             }
         }
@@ -697,6 +729,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
     private func showPopover(_ content: NSViewController, from anchor: NSView) {
         let popover = NSPopover()
         popover.behavior = .transient
+        popover.animates = Motion.isOn
         popover.contentViewController = content
         popover.delegate = self
         openPopover = popover

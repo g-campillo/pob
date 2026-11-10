@@ -18,7 +18,7 @@ final class AppearancePopover: NSViewController {
         onToggleBlocking: @escaping () -> Void = {}, onOpenSettings: @escaping () -> Void = {}
     ) {
         self.model = model
-        blockingCheckbox = site.map { NSButton(checkboxWithTitle: "Block ads on \($0)", target: nil, action: nil) }
+        blockingCheckbox = site.map { HoverButton(checkboxWithTitle: "Block ads on \($0)", target: nil, action: nil) }
         blockingCheckbox?.state = isBlocking ? .on : .off
         self.onToggleBlocking = onToggleBlocking
         self.onOpenSettings = onOpenSettings
@@ -55,7 +55,7 @@ final class AppearancePopover: NSViewController {
             row.mergeCells(in: NSRange(location: 0, length: 3))
             row.topPadding = 4
         }
-        let settingsButton = NSButton(title: "Settings…", target: self, action: #selector(openSettings))
+        let settingsButton = HoverButton(title: "Settings…", target: self, action: #selector(openSettings))
         let settingsRow = grid.addRow(with: [settingsButton])
         settingsRow.mergeCells(in: NSRange(location: 0, length: 3))
         settingsRow.topPadding = 4

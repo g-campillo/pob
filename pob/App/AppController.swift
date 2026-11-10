@@ -104,6 +104,7 @@ final class AppController: NSObject, NSApplicationDelegate {
             reduceTransparency: NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency
         )
         self.appearance = appearance
+        Motion.style = { [weak appearance] in appearance?.motion ?? .smooth }
         observeDisplayOptions(appearance)
 
         let commands = CommandList.standard { [weak self] in self?.perform($0, keyWindow: NSApp.keyWindow) }

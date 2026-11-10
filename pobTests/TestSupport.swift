@@ -69,6 +69,20 @@ func wentModal(during body: () async throws -> Void) async rethrows -> Bool {
     return watch.sawModal
 }
 
+/// Runs `body` with animations forced on or off, then puts the real switches back. A test run has them off.
+/// `body` can't wait on anything, or another test would run with these switches.
+func withMotion(_ style: MotionStyle, reduced: Bool = false, _ body: () throws -> Void) rethrows {
+    let (oldStyle, oldReduced) = (Motion.style, Motion.reducesMotion)
+    defer { (Motion.style, Motion.reducesMotion) = (oldStyle, oldReduced) }
+    Motion.style = { style }
+    Motion.reducesMotion = { reduced }
+    try body()
+}
+
+func pointerEvent(_ type: NSEvent.EventType) -> NSEvent {
+    NSEvent.enterExitEvent(with: type, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0, trackingNumber: 0, userData: nil)!
+}
+
 /// An `AppearanceModel` over a settings file of its own.
 func testAppearance() -> AppearanceModel {
     AppearanceModel(store: SettingsStore(fileURL: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString + ".json")), reduceTransparency: false)

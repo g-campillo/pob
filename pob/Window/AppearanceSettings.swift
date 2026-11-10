@@ -5,6 +5,8 @@ struct AppearanceSettings: Codable, Equatable {
     var blur: Int
     /// nil means Google. Optional so a Stage 2 file, which has no engine, still decodes.
     var searchEngine: SearchEngine? = nil
+    /// nil means smooth, for the same reason.
+    var motion: MotionStyle? = nil
 
     static let standard = AppearanceSettings(transparency: 0.18, blur: 16)
 

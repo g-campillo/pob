@@ -106,14 +106,98 @@ private final class HeldHistory {
         try press(enter, in: field)
         #expect(tabs.isEmpty)
         #expect(!controller.switcher.isHidden)
+    }
 
-        try press(escape, in: field)
-        #expect(controller.switcher.isHidden)
-        #expect(tabs.isEmpty)
-        #expect(controller.window?.firstResponder === controller.window)
+    // MARK: Smooth animations, where a closed panel is still on screen for a moment
 
+    @Test func reopeningWhileThePanelFadesOutKeepsItOpen() async throws {
+        let (controller, _) = make()
+        withMotion(.smooth) {
+            controller.perform(.openSwitcher)
+            controller.switcher.onCancel?()
+            #expect(!controller.switcher.isOpen)
+            #expect(!controller.switcher.isHidden) // still fading
+            controller.perform(.openSwitcher)
+            #expect(controller.switcher.isOpen)
+            #expect(hasKeyboard(controller.switcher.field))
+        }
+        try await Task.sleep(for: .milliseconds(400)) // the fade that was cut short has reported its end by now
+        #expect(!controller.switcher.isHidden)
+    }
+    @Test func aPanelFadingOutLetsClicksThroughAndThenGoes() async throws {
+        let (controller, _) = make()
+        let content = try #require(controller.window?.contentView)
+        withMotion(.smooth) {
+            controller.perform(.openSwitcher)
+            controller.switcher.onCancel?()
+            #expect(content.hitTest(NSPoint(x: 20, y: 20))?.isDescendant(of: controller.switcher) != true)
+            #expect(controller.window?.firstResponder === controller.tab?.webView)
+        }
+        #expect(await eventually { controller.switcher.isHidden })
+    }
+
+    // MARK: A window with no pages
+
+    /// The panel is all an empty window has. Esc used to take it away and leave a blank window.
+    @Test func escInAnEmptyWindowLeavesTheSwitcherUp() throws {
+        let (controller, tabs) = make(tabs: 0)
+        let field = controller.switcher.field
         controller.perform(.openSwitcher)
+        try press(escape, in: field)
+        #expect(!controller.switcher.isHidden)
         #expect(hasKeyboard(field))
+        #expect(tabs.isEmpty)
+    }
+    @Test func aCommandInAnEmptyWindowLeavesTheSwitcherUp() {
+        let (controller, _) = make(tabs: 0)
+        controller.perform(.openSwitcher)
+        controller.perform(.toggleRail)
+        #expect(!controller.switcher.isHidden)
+        #expect(hasKeyboard(controller.switcher.field))
+    }
+    @Test func aCommandRowInAnEmptyWindowLeavesTheSwitcherUp() throws {
+        let (controller, _) = make(tabs: 0)
+        let field = controller.switcher.field
+        controller.perform(.openSwitcher)
+        try type("hide rail", into: field)
+        try press(down, in: field)
+        #expect(controller.switcher.list.selection?.target == .command(.toggleRail))
+        try press(enter, in: field)
+        #expect(controller.railState.visibility == .pinned)
+        #expect(!controller.switcher.isHidden)
+    }
+    /// The switcher's field is the address field of a window with no page.
+    @Test func focusingTheAddressInAnEmptyWindowGoesToTheSwitcher() {
+        let (controller, _) = make(tabs: 0)
+        controller.perform(.focusAddress)
+        #expect(!controller.switcher.isHidden)
+        #expect(hasKeyboard(controller.switcher.field))
+        #expect(controller.railState.visibility == .hidden)
+    }
+    /// There's no page to dim, and a click beside the panel has to reach the rail.
+    @Test func anEmptyWindowHasNoDimmingToCatchClicks() throws {
+        let (controller, tabs) = make(tabs: 0)
+        let content = try #require(controller.window?.contentView)
+        let dimming = try #require(controller.switcher.subviews.first)
+        controller.perform(.openSwitcher)
+        controller.switcher.layoutSubtreeIfNeeded()
+        #expect(dimming.isHidden)
+        #expect(content.hitTest(NSPoint(x: 20, y: 20))?.isDescendant(of: controller.switcher) != true)
+
+        tabs.newTab(nil, activate: true)
+        controller.perform(.openSwitcher)
+        #expect(!dimming.isHidden)
+    }
+    @Test func closingAnEmptyWindowDoesntBringTheSwitcherBack() async throws {
+        let (controller, _) = make(tabs: 0)
+        let window = try #require(controller.window)
+        controller.perform(.openSwitcher)
+        await confirmation { closed in
+            let observer = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: nil) { _ in closed() }
+            controller.perform(.closeTab)
+            NotificationCenter.default.removeObserver(observer)
+        }
+        #expect(controller.switcher.isHidden)
     }
     /// A hosted window is never shown, so AppKit delivers no clicks to it. This checks where a click lands and what it fires.
     @Test func aClickOutsideLandsOnTheDimmingAndClosesIt() throws {
@@ -792,7 +876,7 @@ private final class HeldHistory {
         let current = try #require(controller.tab)
         let target = URL(string: "data:text/html,marked")!
         tabs.profile.bookmarks.toggle(url: target, title: "Marked page")
-        try editAddress("marked", in: controller)
+        try clickAddress(typing: "marked", in: controller)
         try press(down, in: controller.rail.addressField)
         try press(enter, in: controller.rail.addressField)
 
@@ -937,19 +1021,27 @@ private final class HeldHistory {
         #expect(controller.rail.suggestions.rows.contains { $0.section == "Bookmarks" })
         #expect(controller.rail.suggestions.selection == nil)
     }
+    /// ⌘L goes to the switcher in a window with no page, so the rail's own field is reached with a click.
+    /// That window always has the switcher up, so these start with it up.
+    func clickAddress(typing text: String, in controller: WindowController) throws {
+        controller.perform(.openSwitcher)
+        controller.window?.makeFirstResponder(controller.rail.addressField)
+        try type(text, into: controller.rail.addressField)
+    }
     @Test func withNoTabSubmittingTheAddressOpensOne() async throws {
         let (controller, tabs) = make(tabs: 0)
         let target = URL(string: "about:blank#typed")!
-        try editAddress(target.absoluteString, in: controller)
+        try clickAddress(typing: target.absoluteString, in: controller)
         try press(enter, in: controller.rail.addressField)
         #expect(tabs.list.records.count == 1)
+        #expect(controller.switcher.isHidden) // the page has the window now
         #expect(await eventually { controller.tab?.webView.url == target })
     }
     @Test func withNoTabChoosingASuggestionOpensOne() async throws {
         let (controller, tabs) = make(tabs: 0)
         let target = URL(string: "data:text/html,marked")!
         tabs.profile.bookmarks.toggle(url: target, title: "Marked page")
-        try editAddress("marked", in: controller)
+        try clickAddress(typing: "marked", in: controller)
         try press(down, in: controller.rail.addressField)
         try press(enter, in: controller.rail.addressField)
         #expect(tabs.list.records.count == 1)
@@ -957,9 +1049,11 @@ private final class HeldHistory {
     }
     @Test func withNoTabEscLeavesTheWindowEmpty() throws {
         let (controller, tabs) = make(tabs: 0)
-        try editAddress("half typed", in: controller)
+        try clickAddress(typing: "half typed", in: controller)
         try press(escape, in: controller.rail.addressField)
         #expect(tabs.isEmpty)
         #expect(controller.rail.addressField.stringValue == "")
+        #expect(!controller.switcher.isHidden)
+        #expect(hasKeyboard(controller.switcher.field))
     }
 }

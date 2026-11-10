@@ -16,7 +16,13 @@ final class FaviconStore {
 
     func image(forHost host: String) -> NSImage? {
         if let cached = cache[host] { return cached }
-        guard let image = NSImage(contentsOf: Self.fileURL(in: directory, host: host)) else { return nil }
+        guard let file = NSImage(contentsOf: Self.fileURL(in: directory, host: host)) else { return nil }
+        // Sites' icons are square, and nothing else pob draws is. The corners match the letter tile's.
+        let image = NSImage(size: file.size, flipped: false) { rect in
+            NSBezierPath(roundedRect: rect, xRadius: rect.width * 0.22, yRadius: rect.height * 0.22).addClip()
+            file.draw(in: rect)
+            return true
+        }
         cache[host] = image
         return image
     }

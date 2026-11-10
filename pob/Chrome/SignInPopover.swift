@@ -29,7 +29,7 @@ final class SignInPopover: NSViewController {
 
         let title = NSTextField(labelWithString: "Sign in to \(host)")
         title.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
-        let button = NSButton(title: "Fill", target: self, action: #selector(fillPressed))
+        let button = HoverButton(title: "Fill", target: self, action: #selector(fillPressed))
         button.keyEquivalent = "\r"
 
         let stack = NSStackView(views: [title, usernameField, passwordField, button])
