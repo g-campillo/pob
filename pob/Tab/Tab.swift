@@ -230,9 +230,12 @@ final class Tab: NSObject, WKNavigationDelegate, WKUIDelegate {
         decisionHandler: @escaping @MainActor (WKNavigationResponsePolicy) -> Void
     ) {
         // Like Safari, an attachment downloads even when WebKit could show it.
-        let disposition = (navigationResponse.response as? HTTPURLResponse)?.value(forHTTPHeaderField: "Content-Disposition")
+        let http = navigationResponse.response as? HTTPURLResponse
+        let disposition = http?.value(forHTTPHeaderField: "Content-Disposition")
         let isAttachment = disposition?.trimmingCharacters(in: .whitespaces).lowercased().hasPrefix("attachment") == true
-        let isDownload = isAttachment || !navigationResponse.canShowMIMEType
+        // An error answer with nothing to show is no file: a cancelled sign-in ends in an empty 401, which Safari shows as a blank page.
+        let isError = (http?.statusCode ?? 200) >= 400
+        let isDownload = isAttachment || (!navigationResponse.canShowMIMEType && !isError)
         // Only now does it show it's no page, so the one that stays goes back to its own site's rules.
         if isDownload, navigationResponse.isForMainFrame { applyBlocking(for: webView.backForwardList.currentItem?.url) }
         decisionHandler(isDownload ? .download : .allow)

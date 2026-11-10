@@ -13,6 +13,8 @@ final class LocalServer {
         case redirect(to: String)
         /// Closes the connection with no response.
         case hangUp
+        /// An error status with no body and no type, as httpbin answers a cancelled sign-in.
+        case status(Int)
     }
 
     var routes: [String: Reply] = [:]
@@ -94,6 +96,10 @@ final class LocalServer {
             connection.send(content: Data(head.utf8) + sent, completion: .idempotent)
         case .hangUp?:
             close(connection)
+        case .status(let code)?:
+            connection.send(content: Data("HTTP/1.1 \(code) Error\r\nContent-Length: 0\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n".utf8), completion: .contentProcessed { _ in
+                MainActor.assumeIsolated { self.close(connection) }
+            })
         case nil:
             connection.send(content: Data("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8), completion: .contentProcessed { _ in
                 MainActor.assumeIsolated { self.close(connection) }
@@ -279,6 +285,25 @@ final class Asked {
         await finishLoading(tab) { tab.webView.load(URLRequest(url: server.url("/note"))) }
         #expect(tab.profile.downloads.items.isEmpty)
         #expect(tab.webView.url == server.url("/note"))
+    }
+
+    /// WebKit can't show an empty answer with no type, and a cancelled sign-in ends in one. Safari shows a blank page.
+    @Test func anErrorAnswerWithNothingToShowIsntADownload() async throws {
+        let server = try await server(["/secret": .status(401)])
+        defer { server.stop() }
+        let tab = Tab(profile: .temporary())
+        let asked = Asked()
+        asked.install(on: tab.profile.downloads)
+        var finished = false
+        tab.onLoadFinished = { finished = true }
+
+        tab.webView.load(URLRequest(url: server.url("/secret")))
+
+        #expect(await within(seconds: 5) { finished || !asked.alerts.isEmpty })
+        #expect(finished)
+        #expect(asked.alerts.isEmpty)
+        #expect(tab.profile.downloads.items.isEmpty)
+        #expect(tab.webView.url == server.url("/secret"))
     }
 
     @Test func downloadAttributeLinkDownloads() async throws {
