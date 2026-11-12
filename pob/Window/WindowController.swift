@@ -6,6 +6,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
     let tabs: TabManager
     var tab: Tab? { tabs.activeTab }
     let rail = Rail()
+    let navigationPill = NavigationPill()
     let switcher = SwitcherView()
     let backdrop = BackdropView()
     let pill = DomainPill()
@@ -326,6 +327,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         let moves = isVisible != railIsOut
         railIsOut = isVisible
         setWindowButtonsVisible(isVisible)
+        updateNavigationPill() // the pill and the window buttons take turns in the corner
         applyPageStyle()
         switcher.pageInset = isVisible ? Rail.footprint : 0
         pill.isSuppressed = isVisible
@@ -359,6 +361,13 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
 
     func setWindowButtonsVisible(_ visible: Bool) {
         windowButtons.forEach { $0.isHidden = !visible }
+    }
+
+    /// The rail has its own back and forward, so the pill is only up while the rail is away. A window with no page has nowhere to go.
+    private func updateNavigationPill() {
+        let webView = tab?.webView
+        navigationPill.update(canGoBack: webView?.canGoBack ?? false, canGoForward: webView?.canGoForward ?? false)
+        navigationPill.setShown(!railIsOut && webView != nil)
     }
 
     private func buildContent(in window: NSWindow) {
@@ -403,6 +412,15 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
             privateBadge.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12),
         ])
 
+        // After the top strip, so a press on the pill is the pill's and never the start of a window drag.
+        navigationPill.translatesAutoresizingMaskIntoConstraints = false
+        navigationPill.isHidden = tab == nil // where the first update leaves it, so a new window doesn't fade it
+        contentView.addSubview(navigationPill)
+        NSLayoutConstraint.activate([
+            navigationPill.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: NavigationPill.inset),
+            navigationPill.topAnchor.constraint(equalTo: contentView.topAnchor, constant: NavigationPill.inset),
+        ])
+
         // Placed by its frame, because a frame slides on the spring and a constraint doesn't.
         rail.frame = NSRect(
             x: -(Rail.width + Rail.inset),
@@ -444,6 +462,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         edgeStrip.onExit = { [weak self] in self?.scheduleRailClose() }
         rail.onPointerExit = { [weak self] in self?.scheduleRailClose() }
         rail.onNavigate = { [weak self] in self?.perform($0) }
+        navigationPill.onNavigate = { [weak self] in self?.perform($0) }
         rail.onSettings = { [weak self] in self?.showAppearancePopover() }
         rail.onDownloads = { [weak self] in self?.showDownloadsPopover() }
         rail.onProfile = { [weak self] in self?.showProfileMenu() }
@@ -654,6 +673,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
     }
 
     private func updateRailContents() {
+        updateNavigationPill()
         let webView = tab?.webView
         rail.update(url: webView?.url, canGoBack: webView?.canGoBack ?? false, canGoForward: webView?.canGoForward ?? false)
         rail.update(pinned: tabs.profile.bookmarks.pinned, favicons: tabs.profile.favicons)
