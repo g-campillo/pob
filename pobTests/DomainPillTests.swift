@@ -199,6 +199,171 @@ import Testing
         pill.corner.frame = NSRect(origin: .zero, size: DomainPill.cornerSize)
         #expect(pill.corner.hitTest(NSPoint(x: 20, y: 5)) == nil)
     }
+
+    /// A pill whose load has run past its delay, so it shows the host with the bar under it.
+    private func pillShowingALoad(to url: URL, progress: Double = 0.3) async throws -> DomainPill {
+        let pill = DomainPill(frame: .zero)
+        pill.reducesMotion = { true }
+        pill.progressDelay = .milliseconds(20)
+        pill.update(url: url, progress: progress, isLoading: true)
+        try #require(await eventually { pill.showsProgress })
+        return pill
+    }
+    @Test func aQuickLoadNeverShowsTheBar() async throws {
+        let pill = DomainPill(frame: .zero)
+        pill.progressDelay = .milliseconds(200)
+        let url = URL(string: "https://example.com")
+        pill.update(url: url, progress: 0.3, isLoading: true)
+        pill.update(url: url, progress: 1, isLoading: false)
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(pill.isHidden)
+        #expect(!pill.showsProgress)
+        #expect(pill.bar.isHidden)
+    }
+    @Test func aSlowLoadShowsItsHostWithTheBar() async {
+        let pill = DomainPill(frame: .zero)
+        pill.progressDelay = .milliseconds(20)
+        let url = URL(string: "https://docs.example.com/a")!
+        pill.update(url: url, progress: 0.3, isLoading: true)
+        #expect(pill.isHidden)
+        #expect(await eventually { pill.showsProgress })
+        #expect(!pill.isHidden)
+        #expect(text(of: pill) == "docs.example.com")
+        #expect(!pill.bar.isHidden)
+        #expect(pill.bar.fraction == 0.3)
+        #expect(pill.currentURL == url)
+    }
+    @Test func theBarFollowsTheLoadAndARedirectChangesTheHost() async throws {
+        let url = URL(string: "https://docs.example.com/a")!
+        let pill = try await pillShowingALoad(to: url)
+        pill.update(url: url, progress: 0.7, isLoading: true)
+        #expect(pill.bar.fraction == 0.7)
+        let redirect = URL(string: "https://b.example/")!
+        pill.update(url: redirect, progress: 0.8, isLoading: true)
+        #expect(text(of: pill) == "b.example")
+        #expect(pill.currentURL == redirect)
+    }
+    @Test func aLoadThatShowedSettlesIntoTheHost() async throws {
+        let url = URL(string: "https://docs.example.com/a")!
+        let pill = try await pillShowingALoad(to: url)
+        pill.visibleFor = .milliseconds(50)
+        pill.update(url: url, progress: 1, isLoading: false)
+        #expect(!pill.showsProgress)
+        #expect(pill.bar.isHidden) // Motion is off in tests, so the bar fills, fades and goes at once
+        #expect(!pill.isHidden)
+        #expect(text(of: pill) == "docs.example.com")
+        #expect(await eventually { pill.isHidden })
+    }
+    @Test func aLoadThatEndsElsewhereSettlesOnWhereThePageIs() async throws {
+        let pill = try await pillShowingALoad(to: URL(string: "https://b.example/")!)
+        let landed = URL(string: "https://a.example/")!
+        pill.update(url: landed, progress: 1, isLoading: false)
+        #expect(text(of: pill) == "a.example")
+        #expect(pill.currentURL == landed)
+    }
+    @Test func aLoadThatEndsElsewhereWhileAHostIsOnItsClockNamesWhereThePageIs() async throws {
+        let pill = DomainPill(frame: .zero)
+        pill.progressDelay = .milliseconds(20)
+        pill.show(url: URL(string: "https://a.example/")) // the last page's host, still on its 2 s clock
+        pill.update(url: URL(string: "https://b.example/"), progress: 0.3, isLoading: true)
+        #expect(await eventually { pill.showsProgress })
+        let landed = URL(string: "https://c.example/")!
+        pill.update(url: landed, progress: 1, isLoading: false)
+        #expect(pill.currentURL == landed)
+        #expect(text(of: pill) == "c.example") // the pill names the address a click copies
+    }
+    @Test func aFailedLoadsErrorPageBringsNoBarBack() async throws {
+        let url = URL(string: "https://docs.example.com/a")!
+        let pill = try await pillShowingALoad(to: url)
+        pill.update(url: url, progress: 1, isLoading: false)
+        pill.update(url: url, progress: 0.1, isLoading: true)
+        pill.update(url: url, progress: 1, isLoading: false)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(!pill.showsProgress)
+        #expect(pill.bar.isHidden)
+        #expect(!pill.isHidden) // still on its 2 s clock
+    }
+    @Test func aNoticeDuringALoadGivesWayToTheHost() async throws {
+        let pill = try await pillShowingALoad(to: URL(string: "https://docs.example.com/a")!)
+        pill.visibleFor = .milliseconds(30)
+        pill.showNotice("a.zip")
+        #expect(text(of: pill) == "a.zip")
+        #expect(!pill.bar.isHidden)
+        #expect(await eventually { text(of: pill) == "docs.example.com" })
+        #expect(!pill.isHidden)
+    }
+    @Test func theRailHidesALoadAndClosingItBringsItBack() async throws {
+        let url = URL(string: "https://docs.example.com/a")!
+        let pill = try await pillShowingALoad(to: url)
+        pill.isSuppressed = true
+        #expect(pill.isHidden)
+        pill.update(url: url, progress: 0.6, isLoading: true)
+        #expect(pill.isHidden)
+        pill.isSuppressed = false
+        #expect(!pill.isHidden)
+        #expect(!pill.bar.isHidden)
+        #expect(pill.bar.fraction == 0.6)
+    }
+    @Test func aLoadEndingBehindTheRailStaysHidden() async throws {
+        let url = URL(string: "https://docs.example.com/a")!
+        let pill = try await pillShowingALoad(to: url)
+        pill.isSuppressed = true
+        pill.update(url: url, progress: 1, isLoading: false)
+        #expect(pill.isHidden)
+        #expect(pill.bar.isHidden)
+        pill.isSuppressed = false
+        #expect(pill.isHidden)
+    }
+    @Test func anotherPageDropsTheLastPagesBar() async throws {
+        let pill = try await pillShowingALoad(to: URL(string: "https://a.example/")!)
+        pill.showPage(url: URL(string: "https://b.example/"), progress: 1, isLoading: false)
+        #expect(!pill.showsProgress)
+        #expect(pill.bar.isHidden)
+        #expect(text(of: pill) == "b.example")
+    }
+    @Test func anotherPageStillLoadingShowsItsBarAfterTheDelay() async throws {
+        let pill = try await pillShowingALoad(to: URL(string: "https://a.example/")!)
+        pill.showPage(url: URL(string: "https://b.example/"), progress: 0.4, isLoading: true)
+        #expect(!pill.showsProgress)
+        #expect(pill.bar.isHidden)
+        #expect(await eventually { pill.showsProgress })
+        #expect(pill.bar.fraction == 0.4)
+        #expect(!pill.bar.isHidden)
+    }
+    @Test func aLoadWithNoHostShowsNothing() async throws {
+        let pill = DomainPill(frame: .zero)
+        pill.progressDelay = .milliseconds(20)
+        pill.update(url: URL(string: "about:blank"), progress: 0.5, isLoading: true)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(pill.isHidden)
+    }
+    @Test func aLoadHoldsThePillWhenThePointerLeavesTheCorner() async throws {
+        let pill = try await pillShowingALoad(to: URL(string: "https://docs.example.com/a")!)
+        pill.isPointerInCorner = true
+        pill.isPointerInCorner = false
+        #expect(!pill.isHidden)
+    }
+    @Test func theBarsRowMakesThePillTallerUntilTheLoadSettles() async {
+        let pill = DomainPill(frame: .zero)
+        pill.progressDelay = .zero
+        let url = URL(string: "https://example.com")!
+        pill.show(url: url)
+        let idle = pill.fittingSize.height
+        pill.update(url: url, progress: 0.3, isLoading: true)
+        #expect(await eventually { pill.showsProgress })
+        #expect(pill.fittingSize.height > idle)
+        pill.update(url: url, progress: 1, isLoading: false)
+        #expect(pill.fittingSize.height == idle)
+    }
+
+    @Test func theBarStaysInRangeAndNeverTakesClicks() {
+        let bar = LoadingBar(frame: NSRect(x: 0, y: 0, width: 100, height: 3))
+        bar.set(1.4, animated: false)
+        #expect(bar.fraction == 1)
+        bar.set(-1, animated: false)
+        #expect(bar.fraction == 0)
+        #expect(bar.hitTest(NSPoint(x: 50, y: 1)) == nil)
+    }
 }
 
 @Suite struct DomainPillWiringTests {
