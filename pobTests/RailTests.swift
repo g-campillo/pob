@@ -49,6 +49,24 @@ import Testing
         let glass = try #require(Rail(frame: .zero).subviewsDeep.compactMap { $0 as? NSGlassEffectView }.first)
         #expect(glass.style == .regular)
     }
+    /// The lists above it come and go, and the bottom row mustn't ride up when neither is showing.
+    @Test func theBottomRowStaysAtTheBottomWhateverTheListsShow() {
+        let rail = Rail(frame: NSRect(x: 0, y: 0, width: Rail.width, height: 600))
+        func frame(of view: NSView) -> NSRect {
+            rail.layoutSubtreeIfNeeded()
+            return rail.convert(view.bounds, from: view)
+        }
+        let settings = frame(of: rail.settingsButton)
+        #expect(settings.minY < 20) // the stack's 10 pt margin, not somewhere up the rail
+        #expect(frame(of: rail.tabList).minY - settings.maxY <= 12) // the tab list still fills the space down to it
+
+        rail.showSuggestions([SwitcherRow(target: .command(.reload), title: "Reload", subtitle: "", section: "")])
+        #expect(frame(of: rail.settingsButton) == settings) // one short row of suggestions
+
+        rail.showSuggestions([])
+        rail.tabList.isHidden = true
+        #expect(frame(of: rail.settingsButton) == settings) // neither list
+    }
     @Test func pinningMovesThePageOverAndHoverDoesNot() {
         let url = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString + ".json")
         let model = AppearanceModel(store: SettingsStore(fileURL: url), reduceTransparency: false)

@@ -170,13 +170,15 @@ final class Rail: NSView, NSTextFieldDelegate {
         pinned.translatesAutoresizingMaskIntoConstraints = false
         pinned.isHidden = true
 
-        let rows = [topRow, addressRow, pinned, tabList, suggestions, bottomRow]
+        let rows = [topRow, addressRow, pinned, tabList, suggestions]
         let stack = NSStackView(views: rows)
+        // A gravity area of its own keeps it at the bottom whatever the lists above it show, even neither.
+        stack.addView(bottomRow, in: .bottom)
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 8
         stack.translatesAutoresizingMaskIntoConstraints = false
-        for row in rows {
+        for row in rows + [bottomRow] {
             row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         return stack
