@@ -58,6 +58,24 @@ func pillButton(_ label: String, in pill: NavigationPill) -> NSButton? {
         #expect(buttons.allSatisfy { $0 is HoverButton })
         #expect(buttons.map { $0.accessibilityLabel() } == ["Back", "Forward"])
     }
+
+    /// Along the top of the window, AppKit drags the window from any view that doesn't take its own clicks, glass
+    /// included. It leaves one alone only if it won't move the window, accepts first responder and handles the press.
+    @Test func aPressOnItsGlassStopsAtThePill() throws {
+        let behind = ClickSpy(frame: NSRect(x: 0, y: 0, width: 56, height: 28))
+        let pill = NavigationPill(frame: behind.bounds)
+        behind.addSubview(pill)
+        pill.layoutSubtreeIfNeeded()
+        #expect(!pill.mouseDownCanMoveWindow)
+        #expect(pill.acceptsFirstResponder)
+
+        for point in [NSPoint(x: 2, y: 14), NSPoint(x: 54, y: 14)] { // the glass at either end
+            let glass = try #require(pill.hitTest(point))
+            #expect(!(glass is NSButton))
+            glass.mouseDown(with: try #require(NSEvent.mouseEvent(with: .leftMouseDown, location: point, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)))
+        }
+        #expect(behind.events.isEmpty)
+    }
 }
 
 @Suite struct NavigationPillWindowTests {
@@ -121,6 +139,26 @@ func pillButton(_ label: String, in pill: NavigationPill) -> NSButton? {
         let center = back.convert(NSPoint(x: back.bounds.midX, y: back.bounds.midY), to: nil)
         let point = try #require(content.superview?.convert(center, from: nil))
         #expect(content.hitTest(point) === back)
+    }
+
+    /// A dimmed chevron is no help to AppKit, because a disabled button lets the window drag. The pill takes the press instead.
+    @Test func everyPressOnThePillIsThePillsNotAWindowDrag() throws {
+        let controller = controller()
+        let window = try #require(controller.window)
+        let content = try #require(window.contentView)
+        window.layoutIfNeeded()
+        let pill = controller.navigationPill
+        #expect(try !#require(pillButton("Back", in: pill)).isEnabled) // a new page, so both chevrons are dimmed
+        #expect(try !#require(pillButton("Forward", in: pill)).isEnabled)
+        #expect(!pill.mouseDownCanMoveWindow)
+        #expect(pill.acceptsFirstResponder)
+        #expect(!pill.canBecomeKeyView) // only for the title bar, so Tab still goes past it
+
+        for x: CGFloat in [2, 16, 40, 54] { // glass, Back, Forward, glass
+            let center = pill.convert(NSPoint(x: x, y: pill.bounds.midY), to: nil)
+            let point = try #require(content.superview?.convert(center, from: nil))
+            #expect(try #require(content.hitTest(point)).isDescendant(of: pill))
+        }
     }
 
     @Test func theRailAndThePillTakeTurns() {

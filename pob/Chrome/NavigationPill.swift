@@ -32,6 +32,16 @@ final class NavigationPill: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
 
+    /// Along the top of the window, AppKit drags the window from any view that doesn't take its own clicks, glass and
+    /// dimmed buttons included. It leaves a view alone only if it won't move the window, accepts first responder and
+    /// handles the press, so the pill does all three.
+    override var mouseDownCanMoveWindow: Bool { false }
+    override var acceptsFirstResponder: Bool { true }
+    /// Accepting first responder is only for the title bar, so Tab still goes past the pill.
+    override var canBecomeKeyView: Bool { false }
+    /// A press on the glass around the buttons does nothing.
+    override func mouseDown(with event: NSEvent) {}
+
     func update(canGoBack: Bool, canGoForward: Bool) {
         backButton.isEnabled = canGoBack
         forwardButton.isEnabled = canGoForward
