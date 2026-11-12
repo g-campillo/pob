@@ -120,12 +120,11 @@ import Testing
     }
     @Test func everyButtonInTheRailIsOne() {
         let rail = Rail(frame: NSRect(x: 0, y: 0, width: 240, height: 600))
-        rail.update(pinned: [Bookmark(id: UUID(), title: "One", url: URL(string: "https://one.example/")!, folder: nil)],
-                    favicons: FaviconStore(directory: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)))
+        rail.bookmarks.update(folders: [], bookmarks: [Bookmark(id: UUID(), title: "One", url: URL(string: "https://one.example/")!, folder: nil)])
         rail.tabList.update(records: [TabRecord(title: "One")], activeID: nil)
         rail.layoutSubtreeIfNeeded()
         let buttons = rail.subviewsDeep.compactMap { $0 as? NSButton }
-        #expect(buttons.count >= 9) // back, forward, reload, a pinned bookmark, a tab's close, New Tab, profile, downloads, settings
+        #expect(buttons.count >= 11) // back, forward, reload, Bookmarks, New Folder, Add Bookmark, a tab's close, New Tab, profile, downloads, settings
         #expect(buttons.allSatisfy { $0 is HoverButton })
     }
     @Test func everyButtonInThePopoversIsOne() {

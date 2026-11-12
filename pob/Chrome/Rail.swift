@@ -22,7 +22,7 @@ final class Rail: NSView, NSTextFieldDelegate {
     let addressField: NSTextField = AddressField()
     let tabList = TabListView()
     let suggestions = SwitcherList(selectsFirstRow: false)
-    let pinned = PinnedBookmarksView()
+    let bookmarks = BookmarksSection()
     let profileButton: NSButton = HoverButton(title: "", target: nil, action: nil)
     private(set) lazy var settingsButton = iconButton("gearshape", label: "Settings", action: #selector(settingsPressed))
 
@@ -47,11 +47,6 @@ final class Rail: NSView, NSTextFieldDelegate {
         forwardButton.isEnabled = canGoForward
         guard addressField.currentEditor() == nil else { return }
         addressField.stringValue = url?.scheme == "about" ? "" : url?.absoluteString ?? ""
-    }
-
-    func update(pinned bookmarks: [Bookmark], favicons: FaviconStore) {
-        pinned.update(bookmarks: bookmarks, favicons: favicons)
-        pinned.isHidden = bookmarks.isEmpty // a hidden row takes no space in the stack
     }
 
     /// A private window has no other profile to go to, so its button does nothing.
@@ -167,10 +162,7 @@ final class Rail: NSView, NSTextFieldDelegate {
         let bottomRow = NSStackView(views: [profileButton, bottomSpacer, downloadsButton, settingsButton])
         bottomRow.orientation = .horizontal
 
-        pinned.translatesAutoresizingMaskIntoConstraints = false
-        pinned.isHidden = true
-
-        let rows = [topRow, addressRow, pinned, tabList, suggestions]
+        let rows = [topRow, addressRow, bookmarks, tabList, suggestions]
         let stack = NSStackView(views: rows)
         // A gravity area of its own keeps it at the bottom whatever the lists above it show, even neither.
         stack.addView(bottomRow, in: .bottom)
@@ -298,64 +290,4 @@ private final class AddressField: LiteralTextField {
         }
         return accepted
     }
-}
-
-/// Pinned bookmarks as icons that wrap onto new rows. They sit on glass, so they stay plain buttons.
-final class PinnedBookmarksView: NSView {
-    var onOpen: ((Bookmark) -> Void)?
-    var onRemove: ((UUID) -> Void)?
-
-    private static let columns = 7 // fits the rail's fixed width
-    private static let cell: CGFloat = 28
-    private static let gap: CGFloat = 4
-    private var bookmarks: [Bookmark] = []
-    private var favicons: [NSImage?] = []
-
-    override var isFlipped: Bool { true }
-
-    override var intrinsicContentSize: NSSize {
-        let rows = (bookmarks.count + Self.columns - 1) / Self.columns
-        return NSSize(width: NSView.noIntrinsicMetric, height: rows == 0 ? 0 : CGFloat(rows) * (Self.cell + Self.gap) - Self.gap)
-    }
-
-    /// Every change to any tab lands here, and a button rebuilt between press and release never fires.
-    func update(bookmarks: [Bookmark], favicons store: FaviconStore) {
-        let favicons = bookmarks.map { $0.url.host().flatMap(store.image(forHost:)) }
-        guard bookmarks != self.bookmarks || favicons != self.favicons else { return }
-        self.bookmarks = bookmarks
-        self.favicons = favicons
-        subviews.forEach { $0.removeFromSuperview() }
-        for (index, bookmark) in bookmarks.enumerated() {
-            let icon = favicons[index] ?? FaviconStore.letterTile(for: bookmark.url.host() ?? bookmark.title, size: 20)
-            icon.size = NSSize(width: 20, height: 20)
-            let button = HoverButton(image: icon, target: self, action: #selector(pressed(_:)))
-            button.isBordered = false
-            button.refusesFirstResponder = true
-            button.tag = index
-            button.toolTip = bookmark.title
-            button.setAccessibilityLabel(bookmark.title)
-            let menu = NSMenu()
-            for (title, action) in [("Remove", #selector(remove(_:)))] {
-                let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
-                item.target = self
-                item.tag = index
-                menu.addItem(item)
-            }
-            button.menu = menu
-            addSubview(button)
-        }
-        invalidateIntrinsicContentSize()
-        needsLayout = true
-    }
-
-    override func layout() {
-        super.layout()
-        for (index, button) in subviews.enumerated() {
-            let step = Self.cell + Self.gap
-            button.frame = NSRect(x: CGFloat(index % Self.columns) * step, y: CGFloat(index / Self.columns) * step, width: Self.cell, height: Self.cell)
-        }
-    }
-
-    @objc private func pressed(_ sender: NSButton) { onOpen?(bookmarks[sender.tag]) }
-    @objc private func remove(_ sender: NSMenuItem) { onRemove?(bookmarks[sender.tag].id) }
 }

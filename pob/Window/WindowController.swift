@@ -616,8 +616,10 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
 
     private func connectTabs() {
         let bookmarks = tabs.profile.bookmarks
-        rail.pinned.onOpen = { [weak self] in self?.openBookmark($0) }
-        rail.pinned.onRemove = { bookmarks.remove(id: $0) }
+        rail.bookmarks.favicons = tabs.profile.favicons
+        rail.bookmarks.onOpen = { [weak self] in self?.openBookmark($0) }
+        rail.bookmarks.onMove = { bookmarks.move(id: $0, to: $1) }
+        rail.bookmarks.onDelete = { bookmarks.remove(id: $0) }
         rail.tabList.favicons = tabs.profile.favicons
         rail.tabList.onSelect = { [weak self] in self?.tabs.activate($0) }
         rail.tabList.onClose = { [weak self] in self?.tabs.close($0) }
@@ -675,8 +677,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         updateNavigationPill()
         let webView = tab?.webView
         rail.update(url: webView?.url, canGoBack: webView?.canGoBack ?? false, canGoForward: webView?.canGoForward ?? false)
-        // Until the Bookmarks section takes this row's place, it shows the bookmarks in no folder, as ⌘D makes them.
-        rail.update(pinned: tabs.profile.bookmarks.all.filter { $0.folder == nil }, favicons: tabs.profile.favicons)
+        rail.bookmarks.update(folders: tabs.profile.bookmarks.folders, bookmarks: tabs.profile.bookmarks.all)
         rail.tabList.update(records: tabs.list.records, activeID: tabs.list.activeID)
     }
 

@@ -236,6 +236,28 @@ private nonisolated final class IconSite: URLProtocol {
     func iconStore(in folder: URL = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)) -> FaviconStore {
         FaviconStore(directory: folder)
     }
+    func folder() throws -> URL {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder
+    }
+
+    /// Sites' icons are square, and nothing else pob draws is.
+    @Test func aStoredIconComesBackWithRoundedCorners() throws {
+        let folder = try folder()
+        let square = NSImage(size: NSSize(width: 16, height: 16), flipped: false) { rect in
+            NSColor.red.setFill()
+            rect.fill()
+            return true
+        }
+        let png = try #require(square.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:))?.representation(using: .png, properties: [:]))
+        try png.write(to: folder.appending(path: FaviconStore.fileName(forHost: "square.example")))
+
+        let icon = try #require(FaviconStore(directory: folder).image(forHost: "square.example"))
+        let pixels = try #require(icon.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:)))
+        #expect(pixels.colorAt(x: 0, y: 0)?.alphaComponent == 0)
+        #expect(pixels.colorAt(x: pixels.pixelsWide / 2, y: pixels.pixelsHigh / 2)?.alphaComponent == 1)
+    }
 
     @Test func aPagesIconLinkIsFound() {
         func icon(_ html: String) -> String? { FaviconStore.declaredIcon(in: Data(html.utf8)) }
@@ -339,7 +361,7 @@ private nonisolated final class IconSite: URLProtocol {
         let controller = WindowController(appearance: model, tabs: tabs)
         let target = URL(string: "data:text/html,hi")!
         tabs.profile.bookmarks.toggle(url: target, title: "Hi")
-        #expect(!controller.rail.pinned.isHidden)
+        #expect(controller.rail.bookmarks.rows.map(\.key) == [.bookmark(try #require(tabs.profile.bookmarks.all.first).id)])
         let activeBefore = tabs.list.activeID
         controller.openBookmark(try #require(tabs.profile.bookmarks.all.first))
         #expect(tabs.list.records.count == 1)

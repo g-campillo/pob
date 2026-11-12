@@ -110,6 +110,12 @@ import Testing
         let controller = WindowController(appearance: testAppearance(), tabs: TabManager(profile: .makePrivate(from: parent), keepsSpare: false))
         #expect(await controller.searchHistory("seen").isEmpty)
     }
+    @Test func aPrivateWindowListsItsParentsBookmarks() {
+        let parent = Profile.temporary()
+        parent.bookmarks.add(title: "Shared", url: URL(string: "https://shared.example/")!, folder: "F")
+        let controller = WindowController(appearance: testAppearance(), tabs: TabManager(profile: .makePrivate(from: parent), keepsSpare: false))
+        #expect(controller.rail.bookmarks.rows.map(\.key) == [.folder("F")])
+    }
     @Test func theRailSaysPrivate() {
         let controller = WindowController(appearance: testAppearance(), tabs: TabManager(profile: .makePrivate(from: .temporary()), keepsSpare: false))
         #expect(controller.rail.profileButton.title == "Private")

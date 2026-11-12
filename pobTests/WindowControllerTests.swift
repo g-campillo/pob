@@ -439,12 +439,16 @@ import WebKit
     }
 
     /// Nothing about the tab or the bookmark changes when an icon lands, so this is what the rail's guards could lose.
-    @Test func aPagesIconReachesItsRowAndItsPinnedBookmark() async throws {
+    @Test func aPagesIconReachesItsTabRowAndItsBookmarkRow() async throws {
         let (controller, _) = make()
         let tab = try #require(controller.tab)
         let address = URL(string: "https://localhost/icon")!
         let bookmarks = controller.tabs.profile.bookmarks
         bookmarks.toggle(url: address, title: "Icon")
+        controller.rail.bookmarks.setExpanded(true, animated: false)
+        let bookmarkTable = try #require(controller.rail.bookmarks.subviewsDeep.compactMap { $0 as? NSTableView }.first)
+        // The row is there while the icon is missing, so only a refresh can bring the icon to it.
+        #expect(bookmarkTable.view(atColumn: 0, row: 0, makeIfNecessary: true) != nil)
         let favicons = controller.tabs.profile.favicons
         #expect(favicons.image(forHost: "localhost") == nil)
 
@@ -453,12 +457,11 @@ import WebKit
         #expect(await eventually { favicons.image(forHost: "localhost") != nil })
 
         let icon = try #require(favicons.image(forHost: "localhost"))
-        let table = try #require(controller.rail.tabList.subviewsDeep.compactMap { $0 as? NSTableView }.first)
-        #expect(await eventually {
-            let row = table.view(atColumn: 0, row: 0, makeIfNecessary: true)
-            return row?.subviews.contains { ($0 as? NSImageView)?.image === icon } == true
-                && (controller.rail.pinned.subviews.first as? NSButton)?.image === icon
-        })
+        let tabTable = try #require(controller.rail.tabList.subviewsDeep.compactMap { $0 as? NSTableView }.first)
+        func showsIcon(_ table: NSTableView) -> Bool {
+            table.view(atColumn: 0, row: 0, makeIfNecessary: true)?.subviews.contains { ($0 as? NSImageView)?.image === icon } == true
+        }
+        #expect(await eventually { showsIcon(tabTable) && showsIcon(bookmarkTable) })
     }
 
     private func backButton(in controller: WindowController) -> NSButton? {

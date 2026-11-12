@@ -145,73 +145,51 @@ import Testing
         #expect(!controller.rail.isHidden)
         #expect(controller.rail.frame.minX == Rail.inset)
     }
-}
 
-@Suite struct PinnedBookmarksTests {
-    let bookmark = Bookmark(id: UUID(), title: "One", url: URL(string: "https://one.example/")!, folder: nil)
+    // MARK: Bookmarks
 
-    func folder() throws -> URL {
-        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        return folder
-    }
-
-    /// Sites' icons are square, and nothing else pob draws is.
-    @Test func aStoredIconComesBackWithRoundedCorners() throws {
-        let folder = try folder()
-        let square = NSImage(size: NSSize(width: 16, height: 16), flipped: false) { rect in
-            NSColor.red.setFill()
-            rect.fill()
-            return true
+    /// A window on a profile with this many bookmarks in no folder, and one tab.
+    private func window(bookmarks count: Int) -> WindowController {
+        let profile = Profile.temporary()
+        for index in 0..<count {
+            profile.bookmarks.add(title: "Site \(index)", url: URL(string: "https://site\(index).example/")!, folder: nil)
         }
-        let png = try #require(square.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:))?.representation(using: .png, properties: [:]))
-        try png.write(to: folder.appending(path: FaviconStore.fileName(forHost: "square.example")))
-
-        let icon = try #require(FaviconStore(directory: folder).image(forHost: "square.example"))
-        let pixels = try #require(icon.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:)))
-        #expect(pixels.colorAt(x: 0, y: 0)?.alphaComponent == 0)
-        #expect(pixels.colorAt(x: pixels.pixelsWide / 2, y: pixels.pixelsHigh / 2)?.alphaComponent == 1)
+        let tabs = TabManager(profile: profile, keepsSpare: false)
+        tabs.newTab(nil, activate: true)
+        return WindowController(appearance: testAppearance(), tabs: tabs)
+    }
+    /// The pinned rail at this height, with its Bookmarks section open.
+    private func openSection(in controller: WindowController, height: CGFloat) throws -> NSScrollView {
+        let window = try #require(controller.window)
+        window.setContentSize(NSSize(width: 800, height: height))
+        controller.perform(.toggleRail)
+        controller.rail.bookmarks.setExpanded(true, animated: false)
+        window.layoutIfNeeded()
+        return try #require(controller.rail.bookmarks.subviewsDeep.compactMap { $0 as? NSScrollView }.first)
+    }
+    private func settingsButtonInRail(of controller: WindowController) -> NSRect {
+        controller.rail.convert(controller.rail.settingsButton.bounds, from: controller.rail.settingsButton)
     }
 
-    /// A click is a press and a release, and a button rebuilt between the two never fires.
-    @Test func anUpdateWithNothingNewKeepsTheButtons() throws {
-        let favicons = FaviconStore(directory: try folder())
-        let view = PinnedBookmarksView()
-        view.update(bookmarks: [bookmark], favicons: favicons)
-        let button = try #require(view.subviews.first)
-        view.update(bookmarks: [bookmark], favicons: favicons)
-        #expect(view.subviews.count == 1)
-        #expect(view.subviews.first === button)
+    @Test func theBookmarksSectionStartsClosedInANewWindow() throws {
+        let controller = window(bookmarks: 1)
+        let bookmark = try #require(controller.tabs.profile.bookmarks.all.first)
+        #expect(!controller.rail.bookmarks.isExpanded)
+        #expect(controller.rail.bookmarks.rows == [.bookmark(bookmark, inFolder: false)])
     }
-    @Test func aRenamedBookmarkShowsItsNewTitle() {
-        let favicons = FaviconStore(directory: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString))
-        let view = PinnedBookmarksView()
-        view.update(bookmarks: [bookmark], favicons: favicons)
-        var renamed = bookmark
-        renamed.title = "Two"
-        view.update(bookmarks: [renamed], favicons: favicons)
-        #expect(view.subviews.map(\.toolTip) == ["Two"])
+    @Test func manyBookmarksInAShortWindowLeaveTheTabsAndTheBottomRowAlone() throws {
+        let controller = window(bookmarks: 30)
+        let scroll = try openSection(in: controller, height: 360)
+        #expect(scroll.frame.height > 0)
+        #expect(scroll.frame.height <= 0.4 * 360 + 0.5)
+        #expect(controller.rail.tabList.frame.height >= 34) // the New Tab row still fits
+        #expect(settingsButtonInRail(of: controller).minY < 20)
     }
-    @Test func aRemovedBookmarkGoes() {
-        let favicons = FaviconStore(directory: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString))
-        let view = PinnedBookmarksView()
-        view.update(bookmarks: [bookmark], favicons: favicons)
-        view.update(bookmarks: [], favicons: favicons)
-        #expect(view.subviews.isEmpty)
-    }
-    /// The bookmark stays the same, so only the icon itself can say the button is out of date.
-    @Test func aFaviconArrivingRefreshesTheButton() throws {
-        let folder = try folder()
-        let favicons = FaviconStore(directory: folder)
-        let view = PinnedBookmarksView()
-        view.update(bookmarks: [bookmark], favicons: favicons)
-        let tile = (view.subviews.first as? NSButton)?.image
-
-        try writeIcon(forHost: "one.example", in: folder)
-        view.update(bookmarks: [bookmark], favicons: favicons)
-        let shown = (view.subviews.first as? NSButton)?.image
-        #expect(shown === favicons.image(forHost: "one.example"))
-        #expect(shown !== tile)
+    @Test func inATallWindowTheListStopsAtSevenRows() throws {
+        let controller = window(bookmarks: 30)
+        let scroll = try openSection(in: controller, height: 1000)
+        #expect(abs(scroll.frame.height - BookmarksSection.maxListHeight) <= 0.5)
+        #expect(settingsButtonInRail(of: controller).minY < 20)
     }
 }
 
