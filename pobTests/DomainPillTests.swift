@@ -31,13 +31,6 @@ import Testing
         pill.show(url: URL(string: "https://example.com"))
         #expect(pill.isHidden)
     }
-    @Test func loadingLineFollowsProgressAndHidesWhenDone() {
-        let line = LoadingLine(frame: NSRect(x: 0, y: 0, width: 100, height: 2))
-        line.update(progress: 0.4, isLoading: true)
-        #expect(line.fraction == 0.4)
-        line.update(progress: 1, isLoading: false)
-        #expect(line.fraction == 0)
-    }
 
     @Test func aPageWithNoHostHidesTheOldHost() {
         let pill = DomainPill(frame: .zero)
@@ -94,11 +87,6 @@ import Testing
         pill.isSuppressed = false
         pill.show(url: URL(string: "https://example.com"))
         #expect(await eventually { pill.isHidden })
-    }
-    @Test func theLoadingLineNeverTakesClicks() {
-        let line = LoadingLine(frame: NSRect(x: 0, y: 0, width: 100, height: 2))
-        line.update(progress: 0.5, isLoading: true)
-        #expect(line.hitTest(NSPoint(x: 10, y: 1)) == nil)
     }
 
     private func text(of pill: DomainPill) -> String? {
@@ -373,7 +361,7 @@ import Testing
         return WindowController(appearance: model, tabs: tabs)
     }
 
-    @Test func onlyTheActiveTabsProgressReachesTheLine() {
+    @Test func onlyTheActiveTabsProgressIsReported() {
         let tabs = TabManager(profile: .temporary(), keepsSpare: false)
         let background = tabs.newTab(nil, activate: true)
         let active = tabs.newTab(nil, activate: true)
@@ -407,19 +395,17 @@ import Testing
         await finishLoading(tab) { tab.webView.loadHTMLString("<p>x</p>", baseURL: URL(string: "https://localhost/")) }
         #expect(controller.pill.isHidden)
     }
-    @Test func theLineAndPillSitAboveThePageAndBelowTheRail() throws {
+    @Test func thePillSitsAboveThePageAndBelowTheRail() throws {
         let tabs = TabManager(profile: .temporary(), keepsSpare: false)
         let tab = tabs.newTab(nil, activate: true)
         let controller = make(tabs)
         let content = try #require(controller.window?.contentView)
         let order = content.subviews
         let page = try #require(order.firstIndex(of: tab.pageView))
-        for view in [controller.pill, controller.loadingLine] as [NSView] {
-            let index = try #require(order.firstIndex(of: view))
-            #expect(page < index)
-            #expect(try index < #require(order.firstIndex(of: controller.rail)))
-            #expect(try index < #require(order.firstIndex(of: controller.switcher)))
-        }
+        let index = try #require(order.firstIndex(of: controller.pill))
+        #expect(page < index)
+        #expect(try index < #require(order.firstIndex(of: controller.rail)))
+        #expect(try index < #require(order.firstIndex(of: controller.switcher)))
     }
     @Test func theCornerSitsAtTheBottomLeftAndReachesUnderThePillsEdgeOnly() throws {
         let tabs = TabManager(profile: .temporary(), keepsSpare: false)
@@ -555,5 +541,83 @@ import Testing
         controller.pill.show(url: URL(string: "https://a-rather-long-subdomain.of-an-example-host.example.co.uk/"))
         window.layoutIfNeeded()
         #expect(controller.pill.frame.width == 480 * 0.6)
+    }
+
+    /// A window over one tab whose page has loaded and settled, so no late report from that load lands mid-test.
+    private func windowWithASettledPage() async -> (WindowController, Tab) {
+        let tabs = TabManager(profile: .temporary(), keepsSpare: false)
+        let tab = tabs.newTab(nil, activate: true)
+        let controller = make(tabs)
+        await finishLoading(tab) { tab.webView.loadHTMLString("<p>x</p>", baseURL: URL(string: "https://localhost/")) }
+        #expect(await eventually { !tab.webView.isLoading })
+        controller.pill.progressDelay = .milliseconds(10)
+        return (controller, tab)
+    }
+    /// Stands in for WebKit's progress reports with a load that runs past the pill's delay.
+    private func startASlowLoad(in tab: Tab, of controller: WindowController) async throws {
+        tab.onProgress?(0.5, true)
+        try #require(await eventually { controller.pill.showsProgress })
+    }
+    @Test func aSlowLoadInTheActiveTabShowsTheBarThenTheHost() async {
+        let (controller, tab) = await windowWithASettledPage()
+        tab.onProgress?(0.5, true)
+        #expect(await eventually { controller.pill.showsProgress })
+        #expect(controller.pill.bar.fraction == 0.5)
+        #expect(controller.pill.currentURL?.host() == "localhost")
+        tab.onProgress?(1, false)
+        #expect(!controller.pill.showsProgress)
+        #expect(!controller.pill.isHidden)
+    }
+    @Test func aBackgroundTabsLoadLeavesThePillAlone() async throws {
+        let tabs = TabManager(profile: .temporary(), keepsSpare: false)
+        let background = tabs.newTab(nil, activate: true)
+        tabs.newTab(nil, activate: true)
+        let controller = make(tabs)
+        controller.pill.progressDelay = .milliseconds(10)
+        background.onProgress?(0.5, true)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(!controller.pill.showsProgress)
+    }
+    @Test func switchingTabsDropsTheBar() async throws {
+        let (controller, tab) = await windowWithASettledPage()
+        try await startASlowLoad(in: tab, of: controller)
+        controller.tabs.newTab(nil, activate: true)
+        #expect(!controller.pill.showsProgress)
+        #expect(controller.pill.bar.isHidden)
+        #expect(controller.pill.isHidden) // the new tab has no address
+    }
+    @Test func aHoverRailHidesALoadAndPinningItBringsTheLoadBack() async throws {
+        let (controller, tab) = await windowWithASettledPage()
+        let window = try #require(controller.window)
+        try await startASlowLoad(in: tab, of: controller)
+        controller.revealRailImmediately()
+        #expect(controller.pill.isHidden)
+        controller.perform(.toggleRail)
+        #expect(!controller.pill.isHidden)
+        #expect(!controller.pill.bar.isHidden)
+        window.layoutIfNeeded()
+        #expect(controller.pill.frame.minX == Rail.inset + Rail.width + 12)
+        controller.perform(.toggleRail)
+        #expect(!controller.pill.isHidden)
+        window.layoutIfNeeded()
+        #expect(controller.pill.frame.minX == 12)
+    }
+    @Test func aLoadShowsBesideAPinnedRail() async {
+        let (controller, tab) = await windowWithASettledPage()
+        controller.perform(.toggleRail)
+        tab.onProgress?(0.5, true)
+        #expect(await eventually { controller.pill.showsProgress })
+        #expect(!controller.pill.isHidden)
+        #expect(!controller.pill.bar.isHidden)
+    }
+    @Test func aQuickLoadShowsTheHostWithoutABar() async {
+        let tabs = TabManager(profile: .temporary(), keepsSpare: false)
+        let tab = tabs.newTab(nil, activate: true)
+        let controller = make(tabs)
+        #expect(controller.pill.isHidden)
+        await finishLoading(tab) { tab.webView.loadHTMLString("<p>x</p>", baseURL: URL(string: "https://localhost/")) }
+        #expect(!controller.pill.isHidden)
+        #expect(controller.pill.currentURL?.host() == "localhost")
+        #expect(controller.pill.bar.isHidden)
     }
 }

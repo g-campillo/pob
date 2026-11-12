@@ -11,7 +11,6 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
     let backdrop = BackdropView()
     let pill = DomainPill()
     let findBar = FindBar()
-    let loadingLine = LoadingLine()
     let privateBadge = PrivateBadge()
     private(set) var usesFallbackBlur = false
     private(set) var railState = RailState()
@@ -387,15 +386,6 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         topStrip.autoresizingMask = [.width, .minYMargin]
         contentView.addSubview(topStrip)
 
-        loadingLine.frame = NSRect(
-            x: 0,
-            y: contentView.bounds.height - LoadingLine.height,
-            width: contentView.bounds.width,
-            height: LoadingLine.height
-        )
-        loadingLine.autoresizingMask = [.width, .minYMargin]
-        contentView.addSubview(loadingLine)
-
         pill.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(pill)
         NSLayoutConstraint.activate([
@@ -643,7 +633,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
             pill.show(url: finished.webView.url)
             onActivePageFinished?()
         }
-        tabs.onActiveProgress = { [weak self] in self?.loadingLine.update(progress: $0, isLoading: $1) }
+        tabs.onActiveProgress = { [weak self] in self?.pill.update(url: self?.tab?.webView.url, progress: $0, isLoading: $1) }
         tabs.onActiveChange = { [weak self] in
             guard let self else { return }
             showActiveTab()
@@ -673,8 +663,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         }
         applyPageStyle()
         updateRailContents()
-        pill.show(url: tab?.webView.url)
-        loadingLine.update(progress: tab?.webView.estimatedProgress ?? 0, isLoading: tab?.webView.isLoading ?? false)
+        pill.showPage(url: tab?.webView.url, progress: tab?.webView.estimatedProgress ?? 0, isLoading: tab?.webView.isLoading ?? false)
     }
 
     private func applyPageStyle() {
