@@ -48,6 +48,10 @@ func pillButton(_ label: String, in pill: NavigationPill) -> NSButton? {
         #expect(NavigationPill.inset + NavigationPill.height / 2 == Rail.cornerRadius + Rail.inset)
     }
 
+    @Test func theGapBelowThePillMatchesItsMargin() {
+        #expect(NavigationPill.clearance == 52)
+    }
+
     @Test func itsJustBigEnoughForTwoButtons() {
         #expect(NavigationPill().fittingSize == NSSize(width: 56, height: 28))
     }
@@ -185,6 +189,22 @@ func pillButton(_ label: String, in pill: NavigationPill) -> NSButton? {
         strip.onDwell?()
         #expect(controller.railState.visibility == .hover)
         #expect(controller.navigationPill.isHidden)
+    }
+
+    /// A pointer resting at the top of the left edge is on its way to Back, so the rail's strip ends 12 pt below the pill.
+    @Test func theEdgeStripStopsShortOfThePill() throws {
+        let controller = controller()
+        let window = try #require(controller.window)
+        let content = try #require(window.contentView)
+        let strip = try #require(railStrip(in: content))
+
+        for size in [content.bounds.size, NSSize(width: 700, height: 420)] {
+            window.setContentSize(size)
+            window.layoutIfNeeded()
+            #expect(content.bounds.size == size)
+            #expect(strip.frame.maxY == content.bounds.maxY - NavigationPill.clearance)
+            #expect(controller.navigationPill.frame.minY - strip.frame.maxY == NavigationPill.inset)
+        }
     }
 
     @Test func aWindowWithNoPageHasNoPill() {

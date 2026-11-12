@@ -432,7 +432,8 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         rail.isHidden = true
         contentView.addSubview(rail)
 
-        edgeStrip.frame = NSRect(x: 0, y: 0, width: EdgeStrip.width, height: contentView.bounds.height)
+        // It stops short of the pill, so a pointer on its way to Back can't open the rail and put the close button there.
+        edgeStrip.frame = NSRect(x: 0, y: 0, width: EdgeStrip.width, height: contentView.bounds.height - NavigationPill.clearance)
         edgeStrip.autoresizingMask = [.height]
         contentView.addSubview(edgeStrip)
 

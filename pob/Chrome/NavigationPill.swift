@@ -6,6 +6,8 @@ final class NavigationPill: NSView {
     /// From the window's top and left edges. Half the height on top of this makes the window's corner, so the two curves run side by side.
     static let inset: CGFloat = 12
     static let height: CGFloat = 28
+    /// How far down the window's left edge the pill reaches, plus the same margin again below it.
+    static let clearance = 2 * inset + height
     private static let buttonSize: CGFloat = 24
 
     var onNavigate: ((CommandID) -> Void)?
