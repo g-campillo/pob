@@ -70,7 +70,9 @@ final class DomainPill: NSView {
         label.font = .systemFont(ofSize: 12, weight: .medium)
         label.textColor = .labelColor
         label.lineBreakMode = .byTruncatingTail
-        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // Just above the glass's hugging (250). A tie lets the pill settle anywhere down to its padding, with no text showing.
+        // Still below the window's hold on its size (500), so a long host truncates instead of widening the window.
+        label.setContentCompressionResistancePriority(.defaultLow + 1, for: .horizontal)
         label.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(label)
 

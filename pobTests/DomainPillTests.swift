@@ -366,6 +366,29 @@ import Testing
         controller.pill.show(url: URL(string: "https://a-rather-long-subdomain.of-an-example-host.example.co.uk/"))
         window.layoutIfNeeded()
         #expect(controller.pill.frame.minX == Rail.inset + Rail.width + 12)
-        #expect(controller.pill.frame.maxX <= controller.privateBadge.frame.minX - 8)
+        // It shortens to the room it has, not to its padding.
+        #expect(controller.pill.frame.maxX == controller.privateBadge.frame.minX - 8)
+    }
+    @Test func aHostShownBeforeTheFirstLayoutShowsInFull() throws {
+        let tabs = TabManager(profile: .temporary(), keepsSpare: false)
+        tabs.newTab(nil, activate: true)
+        let controller = make(tabs)
+        let window = try #require(controller.window)
+        window.setContentSize(NSSize(width: 1000, height: 600))
+        controller.pill.show(url: URL(string: "https://a-rather-long-subdomain.of-an-example-host.example.co.uk/"))
+        window.layoutIfNeeded()
+        let label = try #require(controller.pill.subviewsDeep.compactMap { $0 as? NSTextField }.first)
+        #expect(label.frame.width >= label.intrinsicContentSize.width)
+        #expect(!controller.pill.hasAmbiguousLayout) // with a tie in priorities, any width down to the padding would do
+    }
+    @Test func inANarrowWindowALongHostFillsThePillsShareOfTheWidth() throws {
+        let tabs = TabManager(profile: .temporary(), keepsSpare: false)
+        tabs.newTab(nil, activate: true)
+        let controller = make(tabs)
+        let window = try #require(controller.window)
+        window.setContentSize(NSSize(width: 480, height: 360))
+        controller.pill.show(url: URL(string: "https://a-rather-long-subdomain.of-an-example-host.example.co.uk/"))
+        window.layoutIfNeeded()
+        #expect(controller.pill.frame.width == 480 * 0.6)
     }
 }
