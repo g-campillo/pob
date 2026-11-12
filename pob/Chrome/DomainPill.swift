@@ -1,8 +1,12 @@
 import AppKit
 
-/// A small glass pill at the bottom left. It names the page's host for a moment after a load, and clicking it copies the address.
+/// A small glass pill at the bottom left. It names the page's host for a moment after a load and while the pointer rests in the window's bottom-left corner, and clicking it copies the address.
 final class DomainPill: NSView {
     static let visibleDuration: Duration = .seconds(2)
+    /// The band along the window's bottom edge, from its left corner, where resting the pointer brings the pill up.
+    /// It reaches a little way under the pill, so the pointer moves onto the pill without leaving both, and no further,
+    /// so a link under the pill still takes a click.
+    static let cornerSize = NSSize(width: 200, height: 18)
     private static let fadeDuration: TimeInterval = 0.2
 
     /// Punycode, so lookalike hosts stand out. `URL.host()` would percent-encode a raw international host instead.
@@ -14,11 +18,26 @@ final class DomainPill: NSView {
     /// True while the rail is open, so the pill stays out of its way.
     var isSuppressed = false {
         didSet {
-            if isSuppressed { hide(animated: false) }
+            if isSuppressed {
+                hide(animated: false)
+            } else if oldValue, isHeld { // the pointer still in the corner gets the pill back
+                reveal()
+            }
         }
     }
+    /// The pointer is resting in the corner, and the pill stays up until it leaves.
+    var isPointerInCorner = false {
+        didSet {
+            guard isPointerInCorner != oldValue else { return }
+            if isPointerInCorner { reveal() } else { hideIfFree() }
+        }
+    }
+    /// Watches the corner for the pointer. The window places it, and it never takes clicks.
+    let corner = EdgeStrip()
     /// The page's address. A notice never changes it.
     private(set) var currentURL: URL?
+    /// A fade out is running. Its completion hides the pill only if nothing showed it again first.
+    private(set) var isFadingOut = false
 
     /// Replaceable so tests needn't wait out the real times.
     var visibleFor = DomainPill.visibleDuration
@@ -29,6 +48,10 @@ final class DomainPill: NSView {
     private var hideTask: Task<Void, Never>?
     private var fadeGeneration = 0
     private var isHovered = false
+    /// A notice or Copied, shown over the host until its time is up.
+    private var message: String?
+    /// Text is up for a set time, on a clock that hovering pauses.
+    private var isOnClock = false
     private var trackingArea: NSTrackingArea?
 
     override init(frame: NSRect) {
@@ -63,6 +86,8 @@ final class DomainPill: NSView {
         ])
         setAccessibilityRole(.button)
         setAccessibilityLabel("Copy address")
+        corner.onDwell = { [weak self] in self?.isPointerInCorner = true }
+        corner.onExit = { [weak self] in self?.isPointerInCorner = false }
     }
 
     @available(*, unavailable)
@@ -71,8 +96,8 @@ final class DomainPill: NSView {
     /// Shows the host of a freshly loaded page, or hides the pill when the page has none.
     func show(url: URL?) {
         currentURL = url
-        guard let host = Self.displayHost(for: url) else { return hide(animated: false) }
-        present(host, for: visibleFor)
+        guard Self.displayHost(for: url) != nil else { return hide(animated: false) }
+        present(nil, for: visibleFor)
     }
 
     /// Shows text for the same time, such as a download's filename. The page's address stays as it was.
@@ -88,17 +113,33 @@ final class DomainPill: NSView {
 
     // MARK: Showing and hiding
 
-    private func present(_ text: String, for duration: Duration, holdsOnHover: Bool = true) {
-        guard !isSuppressed else { return hide(animated: false) }
-        fadeGeneration += 1
-        label.stringValue = text
+    /// Something besides a clock keeps the pill up.
+    private var isHeld: Bool { isPointerInCorner }
+
+    /// Shows a notice, or the host when there's none, for `duration`.
+    private func present(_ message: String?, for duration: Duration, holdsOnHover: Bool = true) {
+        self.message = message
+        reveal()
+        guard !isHidden else { return } // the rail is open, or there's nothing to say
+        isOnClock = true
+        scheduleHide(after: duration, holdsOnHover: holdsOnHover)
+    }
+
+    /// Brings the pill up with the notice, or else the host. With nothing to say, or with the rail open, it hides instead.
+    private func reveal() {
+        guard !isSuppressed, let text = message ?? Self.displayHost(for: currentURL) else { return hide(animated: false) }
+        if label.stringValue != text { // only a change, so a repeat doesn't lay the pill out again
+            label.stringValue = text
+        }
+        guard isHidden || isFadingOut else { return } // already up, and a fade in still running carries on
+        fadeGeneration += 1 // a fade out still running no longer owns the pill
+        isFadingOut = false
         let fadesIn = isHidden && !reducesMotion()
         alphaValue = fadesIn ? 0 : 1
         isHidden = false
         if fadesIn {
             Motion.animate(Motion.fadeIn) { alphaValue = 1 }
         }
-        scheduleHide(after: duration, holdsOnHover: holdsOnHover)
     }
 
     /// Hovering holds the pill, so the clock only runs while the pointer is outside it.
@@ -108,8 +149,21 @@ final class DomainPill: NSView {
         hideTask = Task { [weak self] in
             try? await Task.sleep(for: duration)
             guard !Task.isCancelled else { return }
-            self?.hide(animated: true)
+            self?.clockRanOut()
         }
+    }
+
+    /// A notice gives way to the host while something else holds the pill. Otherwise the pill goes.
+    private func clockRanOut() {
+        isOnClock = false
+        message = nil
+        if isHeld { reveal() } else { hide(animated: true) }
+    }
+
+    /// Hides the pill once nothing keeps it up: no clock, no pointer on it, and nothing else holding it.
+    private func hideIfFree() {
+        guard !isOnClock, !isHovered, !isHeld else { return }
+        hide(animated: true)
     }
 
     /// Replaceable because the fade's completion never fires while the display is asleep, so tests take the instant path.
@@ -117,13 +171,17 @@ final class DomainPill: NSView {
 
     private func hide(animated: Bool) {
         hideTask?.cancel()
+        isOnClock = false
+        message = nil
         fadeGeneration += 1
         let generation = fadeGeneration
         guard animated, !isHidden, !reducesMotion() else {
+            isFadingOut = false
             isHidden = true
             isHovered = false // a hidden view gets no mouseExited
             return
         }
+        isFadingOut = true
         NSAnimationContext.runAnimationGroup { context in
             context.duration = Self.fadeDuration
             animator().alphaValue = 0
@@ -131,6 +189,7 @@ final class DomainPill: NSView {
             MainActor.assumeIsolated {
                 // A new show in the meantime owns the pill.
                 guard let self, self.fadeGeneration == generation else { return }
+                self.isFadingOut = false
                 self.isHidden = true
                 self.isHovered = false
             }
@@ -167,16 +226,21 @@ final class DomainPill: NSView {
     override func mouseEntered(with event: NSEvent) {
         isHovered = true
         hideTask?.cancel()
-        if !isHidden, alphaValue < 1 { // caught mid-fade
+        if isFadingOut { // caught mid-fade. It goes back on its clock, which waits for the pointer to leave
             fadeGeneration += 1
+            isFadingOut = false
+            isOnClock = true
             alphaValue = 1
         }
     }
 
     override func mouseExited(with event: NSEvent) {
         isHovered = false
-        if !isHidden {
+        guard !isHidden else { return }
+        if isOnClock {
             scheduleHide(after: visibleFor)
+        } else {
+            hideIfFree()
         }
     }
 }

@@ -432,10 +432,19 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         rail.isHidden = true
         contentView.addSubview(rail)
 
-        // It stops short of the pill, so a pointer on its way to Back can't open the rail and put the close button there.
-        edgeStrip.frame = NSRect(x: 0, y: 0, width: EdgeStrip.width, height: contentView.bounds.height - NavigationPill.clearance)
+        // It stops short of the back and forward pill, so a pointer on its way to Back can't open the rail and put the
+        // close button there. The window's very corner brings up the url pill, so the strip starts above it.
+        edgeStrip.frame = NSRect(
+            x: 0,
+            y: DomainPill.cornerSize.height,
+            width: EdgeStrip.width,
+            height: contentView.bounds.height - DomainPill.cornerSize.height - NavigationPill.clearance
+        )
         edgeStrip.autoresizingMask = [.height]
         contentView.addSubview(edgeStrip)
+
+        pill.corner.frame = NSRect(origin: .zero, size: DomainPill.cornerSize)
+        contentView.addSubview(pill.corner)
 
         findBar.translatesAutoresizingMaskIntoConstraints = false
         findBar.isHidden = true
