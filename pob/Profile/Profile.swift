@@ -86,7 +86,8 @@ final class Profile {
     }
 
     /// Cookies in memory and a temporary folder that goes with its last window. It reads its parent's bookmarks, icons,
-    /// rules and downloads folder, and writes no history or icons. A private profile passed in hands over its own parent.
+    /// rules and downloads folder, and writes no history, and no icons but those of bookmarks saved in it, which go to
+    /// its parent. A private profile passed in hands over its own parent.
     static func makePrivate(from parent: Profile) -> Profile {
         let parent = parent.parent ?? parent
         let id = UUID()

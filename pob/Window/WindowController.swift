@@ -188,6 +188,22 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
     }
     /// The import in progress, for tests to wait on.
     private(set) var importTask: Task<Void, Never>?
+    /// A saved bookmark has no page open to read its icon from, so it comes from the address. Replaceable so a test
+    /// never reaches the network.
+    var fetchBookmarkIcon: (FaviconStore, URL) async -> Void = { favicons, url in
+        guard let host = url.host() else { return }
+        await favicons.update(host: host, page: url)
+    }
+    /// A sheet over the window, before a folder goes with its bookmarks. Replaceable so a test can answer it.
+    var confirmDeleteFolder: (WindowController, String, Int) async -> Bool = { @MainActor controller, name, count in
+        guard let window = controller.window else { return false }
+        let alert = NSAlert()
+        alert.messageText = "Delete “\(name)” and the \(count) bookmark\(count == 1 ? "" : "s") in it?"
+        alert.informativeText = "This can't be undone."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        return await alert.beginSheetModal(for: window) == .alertFirstButtonReturn
+    }
 
     private func importBookmarks() {
         guard importTask == nil else { return }
@@ -310,7 +326,10 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         case .importBookmarks: importBookmarks()
         case .bookmarkPage:
             guard let webView = tab?.webView, let url = webView.url, url.scheme != "about" else { return }
-            tabs.profile.bookmarks.toggle(url: url, title: webView.title?.isEmpty == false ? webView.title! : url.host() ?? url.absoluteString)
+            let title = webView.title?.isEmpty == false ? webView.title! : url.host() ?? url.absoluteString
+            if tabs.profile.bookmarks.toggle(url: url, title: title) != nil {
+                fetchIcon(for: url)
+            }
         }
     }
 
@@ -532,6 +551,77 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         navigate(.url(bookmark.url))
     }
 
+    /// A new bookmark when `bookmark` is nil, filled in from the page. A new address fetches its icon.
+    private func showBookmarkEditor(for bookmark: Bookmark?, focus: BookmarkEditor.Field, from anchor: NSView) {
+        let store = tabs.profile.bookmarks
+        let page = tab?.webView.url.flatMap { $0.scheme == "about" ? nil : $0 }
+        let editor = BookmarkEditor(
+            heading: bookmark == nil ? "New Bookmark" : "Edit Bookmark",
+            name: bookmark?.title ?? (page == nil ? "" : tab?.title ?? ""),
+            address: bookmark?.url ?? page,
+            folder: bookmark?.folder,
+            folders: store.folders,
+            focus: focus
+        ) { [weak self] entry in
+            guard let self else { return }
+            openPopover?.close()
+            if let bookmark {
+                store.update(id: bookmark.id, title: entry.title, url: entry.url, folder: entry.folder)
+                if entry.url != bookmark.url { fetchIcon(for: entry.url) }
+            } else {
+                let added = store.add(title: entry.title, url: entry.url, folder: entry.folder)
+                rail.bookmarks.reveal(bookmark: added.id)
+                fetchIcon(for: entry.url)
+            }
+        }
+        revealRailImmediately()
+        showPopover(editor, from: anchor)
+    }
+
+    /// A new folder when `folder` is nil. An empty or taken name is refused, and the editor stays.
+    private func showFolderEditor(renaming folder: String?, from anchor: NSView) {
+        let store = tabs.profile.bookmarks
+        let editor = FolderEditor(heading: folder == nil ? "New Folder" : "Rename Folder", name: folder ?? "") { [weak self] name in
+            guard let self else { return false }
+            if let folder {
+                guard store.renameFolder(folder, to: name) != nil else { return false }
+            } else {
+                guard let added = store.addFolder(name) else { return false }
+                rail.bookmarks.reveal(folder: added)
+            }
+            openPopover?.close()
+            return true
+        }
+        revealRailImmediately()
+        showPopover(editor, from: anchor)
+    }
+
+    /// Its bookmarks go with it, so a folder that has any asks first.
+    private func deleteFolder(_ name: String) {
+        let store = tabs.profile.bookmarks
+        let count = store.all.count { $0.folder == name }
+        guard count > 0 else {
+            store.removeFolder(name)
+            return
+        }
+        Task { [weak self] in
+            guard let self, await confirmDeleteFolder(self, name, count) else { return }
+            store.removeFolder(name)
+        }
+    }
+
+    /// When the icon lands, every window of the profile shows it. A private window's bookmark is its parent's, so it
+    /// gets an icon too.
+    private func fetchIcon(for url: URL) {
+        let store = tabs.profile.bookmarks
+        let favicons = tabs.profile.favicons
+        let fetch = fetchBookmarkIcon
+        Task {
+            await fetch(favicons, url)
+            store.iconsChanged()
+        }
+    }
+
     private func connectSwitcher() {
         switcher.onChoose = { [weak self] in self?.chooseInSwitcher($0) }
         switcher.onCancel = { [weak self] in
@@ -620,6 +710,12 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         rail.bookmarks.onOpen = { [weak self] in self?.openBookmark($0) }
         rail.bookmarks.onMove = { bookmarks.move(id: $0, to: $1) }
         rail.bookmarks.onDelete = { bookmarks.remove(id: $0) }
+        rail.bookmarks.onAdd = { [weak self] in self?.showBookmarkEditor(for: nil, focus: .name, from: $0) }
+        rail.bookmarks.onRename = { [weak self] in self?.showBookmarkEditor(for: $0, focus: .name, from: $1) }
+        rail.bookmarks.onEditAddress = { [weak self] in self?.showBookmarkEditor(for: $0, focus: .address, from: $1) }
+        rail.bookmarks.onNewFolder = { [weak self] in self?.showFolderEditor(renaming: nil, from: $0) }
+        rail.bookmarks.onRenameFolder = { [weak self] in self?.showFolderEditor(renaming: $0, from: $1) }
+        rail.bookmarks.onDeleteFolder = { [weak self] in self?.deleteFolder($0) }
         rail.tabList.favicons = tabs.profile.favicons
         rail.tabList.onSelect = { [weak self] in self?.tabs.activate($0) }
         rail.tabList.onClose = { [weak self] in self?.tabs.close($0) }
