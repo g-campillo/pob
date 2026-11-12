@@ -303,7 +303,6 @@ private final class AddressField: LiteralTextField {
 /// Pinned bookmarks as icons that wrap onto new rows. They sit on glass, so they stay plain buttons.
 final class PinnedBookmarksView: NSView {
     var onOpen: ((Bookmark) -> Void)?
-    var onUnpin: ((UUID) -> Void)?
     var onRemove: ((UUID) -> Void)?
 
     private static let columns = 7 // fits the rail's fixed width
@@ -336,7 +335,7 @@ final class PinnedBookmarksView: NSView {
             button.toolTip = bookmark.title
             button.setAccessibilityLabel(bookmark.title)
             let menu = NSMenu()
-            for (title, action) in [("Unpin", #selector(unpin(_:))), ("Remove", #selector(remove(_:)))] {
+            for (title, action) in [("Remove", #selector(remove(_:)))] {
                 let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
                 item.target = self
                 item.tag = index
@@ -358,6 +357,5 @@ final class PinnedBookmarksView: NSView {
     }
 
     @objc private func pressed(_ sender: NSButton) { onOpen?(bookmarks[sender.tag]) }
-    @objc private func unpin(_ sender: NSMenuItem) { onUnpin?(bookmarks[sender.tag].id) }
     @objc private func remove(_ sender: NSMenuItem) { onRemove?(bookmarks[sender.tag].id) }
 }

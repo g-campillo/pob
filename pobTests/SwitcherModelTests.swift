@@ -5,7 +5,7 @@ import Testing
 
 @Suite struct SwitcherModelTests {
     let deployTab = TabRecord(url: URL(string: "https://docs.example.com/deploy"), title: "Deploy guide")
-    let bookmark = Bookmark(id: UUID(), title: "Deployment checklist", url: URL(string: "https://example.com/check")!, folder: nil, isPinned: true)
+    let bookmark = Bookmark(id: UUID(), title: "Deployment checklist", url: URL(string: "https://example.com/check")!, folder: nil)
     let visit = HistoryEntry(url: URL(string: "https://ops.example.com/deploy")!, title: "Deploy logs", visitCount: 2, lastVisit: .now)
     let commands = CommandList.standard { _ in }.all
 
@@ -59,7 +59,7 @@ import Testing
     let commands = CommandList.standard { _ in }.all
 
     func page(_ index: Int) -> URL { URL(string: "https://example.com/deploy/\(index)")! }
-    func bookmark(_ url: URL) -> Bookmark { Bookmark(id: UUID(), title: "Deploy", url: url, folder: nil, isPinned: false) }
+    func bookmark(_ url: URL) -> Bookmark { Bookmark(id: UUID(), title: "Deploy", url: url, folder: nil) }
     func visit(_ url: URL) -> HistoryEntry { HistoryEntry(url: url, title: "Deploy", visitCount: 1, lastVisit: .now) }
 
     @Test func eachSectionStopsAtItsLimit() {
@@ -79,7 +79,7 @@ import Testing
     }
     @Test func aURLGoesAfterTheTabsAndASearchGoesAboveTheCommands() {
         let tab = TabRecord(url: URL(string: "https://apple.com/mac"), title: "Mac")
-        let mark = Bookmark(id: UUID(), title: "Apple", url: URL(string: "https://apple.com/store")!, folder: nil, isPinned: false)
+        let mark = Bookmark(id: UUID(), title: "Apple", url: URL(string: "https://apple.com/store")!, folder: nil)
         let seen = HistoryEntry(url: URL(string: "https://apple.com/tv")!, title: "Apple TV", visitCount: 1, lastVisit: .now)
         let command = Command(id: .reload, title: "apple.com things", key: "", modifiers: [], isReserved: false) {}
         let address = SwitcherModel.rows(query: "apple.com", tabs: [tab], bookmarks: [mark], history: [seen], commands: [command])
@@ -114,7 +114,7 @@ import Testing
     }
     @Test func aTypedAddressIsntRepeatedByItsBookmarkOrHistory() {
         let url = URL(string: "https://apple.com")!
-        let mark = Bookmark(id: UUID(), title: "Apple", url: url, folder: nil, isPinned: false)
+        let mark = Bookmark(id: UUID(), title: "Apple", url: url, folder: nil)
         let result = SwitcherModel.rows(query: "apple.com", tabs: [], bookmarks: [mark], history: [visit(url)], commands: [])
         #expect(result.map(\.target) == [.address(.url(url))])
     }

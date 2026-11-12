@@ -445,7 +445,6 @@ import WebKit
         let address = URL(string: "https://localhost/icon")!
         let bookmarks = controller.tabs.profile.bookmarks
         bookmarks.toggle(url: address, title: "Icon")
-        bookmarks.setPinned(true, id: try #require(bookmarks.all.first).id)
         let favicons = controller.tabs.profile.favicons
         #expect(favicons.image(forHost: "localhost") == nil)
 

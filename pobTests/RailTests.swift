@@ -148,7 +148,7 @@ import Testing
 }
 
 @Suite struct PinnedBookmarksTests {
-    let bookmark = Bookmark(id: UUID(), title: "One", url: URL(string: "https://one.example/")!, folder: nil, isPinned: true)
+    let bookmark = Bookmark(id: UUID(), title: "One", url: URL(string: "https://one.example/")!, folder: nil)
 
     func folder() throws -> URL {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)

@@ -120,7 +120,7 @@ import Testing
     }
     @Test func everyButtonInTheRailIsOne() {
         let rail = Rail(frame: NSRect(x: 0, y: 0, width: 240, height: 600))
-        rail.update(pinned: [Bookmark(id: UUID(), title: "One", url: URL(string: "https://one.example/")!, folder: nil, isPinned: true)],
+        rail.update(pinned: [Bookmark(id: UUID(), title: "One", url: URL(string: "https://one.example/")!, folder: nil)],
                     favicons: FaviconStore(directory: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)))
         rail.tabList.update(records: [TabRecord(title: "One")], activeID: nil)
         rail.layoutSubtreeIfNeeded()
