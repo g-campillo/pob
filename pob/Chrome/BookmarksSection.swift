@@ -48,7 +48,7 @@ final class BookmarksSection: NSView, NSTableViewDataSource, NSTableViewDelegate
     private(set) lazy var toggleButton = makeToggleButton()
     private(set) lazy var newFolderButton = iconButton("folder.badge.plus", label: "New Folder", action: #selector(newFolderPressed))
     private(set) lazy var addButton = iconButton("plus", label: "Add Bookmark", action: #selector(addPressed))
-    /// What the list would like to be. Below required, so a short window can take some back.
+    /// What the list would like to be. Below the window's own size, so a short window can take some back.
     private(set) lazy var listHeight = scroll.heightAnchor.constraint(equalToConstant: 0)
 
     private let table = ClickOnlyTable()
@@ -106,7 +106,8 @@ final class BookmarksSection: NSView, NSTableViewDataSource, NSTableViewDelegate
             scroll.topAnchor.constraint(equalTo: header.bottomAnchor),
             scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
-        listHeight.priority = .defaultHigh
+        // Under the window's hold on its own size, or the window grows to fit the list instead of the list shrinking.
+        listHeight.priority = NSLayoutConstraint.Priority(NSLayoutConstraint.Priority.windowSizeStayPut.rawValue - 10)
         listHeight.isActive = true
     }
 

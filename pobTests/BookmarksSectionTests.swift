@@ -85,6 +85,25 @@ import Testing
         #expect(BookmarksSection.maxListHeight == 210)
         #expect(section.listHeight.constant == BookmarksSection.maxListHeight)
     }
+    /// The window keeps its size, and the list gives way to stay within its share.
+    @Test func aShortWindowShrinksTheListInsteadOfGrowing() throws {
+        let (window, section) = try inWindow(bookmarks: loose(30))
+        defer { window.close() }
+        window.setContentSize(NSSize(width: 300, height: 360))
+        section.setExpanded(true, animated: false)
+        window.layoutIfNeeded()
+        #expect(try scroll(in: section).frame.height <= BookmarksSection.maxWindowShare * 360 + 0.5)
+        #expect(try #require(window.contentView).frame.height == 360)
+    }
+    @Test func aTallWindowShowsSevenRows() throws {
+        let (window, section) = try inWindow(bookmarks: loose(30))
+        defer { window.close() }
+        window.setContentSize(NSSize(width: 300, height: 1000))
+        section.setExpanded(true, animated: false)
+        window.layoutIfNeeded()
+        #expect(try scroll(in: section).frame.height == BookmarksSection.maxListHeight)
+        #expect(try #require(window.contentView).frame.height == 1000)
+    }
     @Test func clickingAFolderOpensAndClosesIt() {
         let section = showing(folders: ["Work"], bookmarks: [w1])
         section.clickRow(0)
