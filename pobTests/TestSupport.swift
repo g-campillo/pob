@@ -87,3 +87,12 @@ func pointerEvent(_ type: NSEvent.EventType) -> NSEvent {
 func testAppearance() -> AppearanceModel {
     AppearanceModel(store: SettingsStore(fileURL: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString + ".json")), reduceTransparency: false)
 }
+
+/// Runs the item with this title as choosing it would. False when the menu has none.
+@discardableResult
+func choose(_ title: String, in menu: NSMenu) -> Bool {
+    let index = menu.indexOfItem(withTitle: title)
+    guard index >= 0 else { return false }
+    menu.performActionForItem(at: index)
+    return true
+}
