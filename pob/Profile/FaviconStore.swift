@@ -131,6 +131,7 @@ final class FaviconStore {
         defer { session.invalidateAndCancel() } // the rest of a long page isn't wanted
         var request = URLRequest(url: url)
         request.timeoutInterval = 10
+        request.httpShouldHandleCookies = false // the icon request shares this configuration, so a cookie kept here would go out with it
         guard let (bytes, response) = try? await session.bytes(for: request) else { return nil }
         if let http = response as? HTTPURLResponse, http.statusCode != 200 { return nil }
         var html = Data()
@@ -143,11 +144,13 @@ final class FaviconStore {
         return (html, response.url ?? url)
     }
 
-    /// Ephemeral, as every caller passes it, so icon requests keep no cookies. Stops reading once the cap is passed.
+    /// Sends no cookies, not even ones the page just set through the same configuration. Stops reading once the cap is passed.
     private static func fetch(_ url: URL, configuration: URLSessionConfiguration) async -> Data? {
         let session = URLSession(configuration: configuration)
         defer { session.finishTasksAndInvalidate() }
-        guard let (bytes, response) = try? await session.bytes(from: url) else { return nil }
+        var request = URLRequest(url: url)
+        request.httpShouldHandleCookies = false
+        guard let (bytes, response) = try? await session.bytes(for: request) else { return nil }
         if let http = response as? HTTPURLResponse, http.statusCode != 200 { return nil }
         guard response.expectedContentLength <= maxBytes else { return nil }
         var data = Data()

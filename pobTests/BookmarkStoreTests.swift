@@ -18,6 +18,10 @@ private nonisolated final class IconSite: URLProtocol {
         case ("linked.example", "/icon.png"): (200, Self.png)
         case ("plain.example", "/"): (200, Data("<title>Plain</title>".utf8))
         case ("plain.example", "/favicon.ico"), ("missing.example", "/favicon.ico"): (200, Self.png)
+        // The loader leaves cookies to a stub, so this site refuses any request that would send or keep them.
+        case ("cookie.example", _) where request.httpShouldHandleCookies: (403, Data())
+        case ("cookie.example", "/"): (200, Data(#"<link rel="icon" href="/icon.png">"#.utf8))
+        case ("cookie.example", "/icon.png"): (200, Self.png)
         default: (404, Data())
         }
         client.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
@@ -278,6 +282,13 @@ private nonisolated final class IconSite: URLProtocol {
         let store = iconStore()
         await store.update(host: "missing.example", page: URL(string: "https://missing.example/")!, configuration: iconSite())
         #expect(store.image(forHost: "missing.example") != nil)
+    }
+    /// The page and icon requests share one configuration, so a cookie the page set would go out with the icon request.
+    /// That site has no `/favicon.ico`, so the icon comes only if neither request handles cookies.
+    @Test func iconRequestsNeitherSendNorKeepCookies() async {
+        let store = iconStore()
+        await store.update(host: "cookie.example", page: URL(string: "https://cookie.example/")!, configuration: iconSite())
+        #expect(store.image(forHost: "cookie.example") != nil)
     }
     @Test func aSiteWithNoIconLeavesNothingBehind() async {
         let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
