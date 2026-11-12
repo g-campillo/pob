@@ -15,7 +15,7 @@ final class DomainPill: NSView {
         return host
     }
 
-    /// True while the rail is open, so the pill stays out of its way.
+    /// True while a rail opened by hovering covers the corner, so the pill stays out of its way. A pinned rail leaves it be.
     var isSuppressed = false {
         didSet {
             if isSuppressed {

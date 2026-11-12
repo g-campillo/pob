@@ -330,7 +330,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         updateNavigationPill() // the pill and the window buttons take turns in the corner
         applyPageStyle()
         switcher.pageInset = isVisible ? Rail.footprint : 0
-        pill.isSuppressed = isVisible
+        placePill()
 
         let x = isVisible ? Rail.inset : -(Rail.width + Rail.inset)
         guard animated, Motion.isOn else {
@@ -399,7 +399,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         pill.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(pill)
         NSLayoutConstraint.activate([
-            pill.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
+            pillLeading,
             pill.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12),
             pill.widthAnchor.constraint(lessThanOrEqualTo: contentView.widthAnchor, multiplier: 0.6),
         ])
@@ -410,6 +410,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         NSLayoutConstraint.activate([
             privateBadge.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
             privateBadge.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12),
+            pill.trailingAnchor.constraint(lessThanOrEqualTo: privateBadge.leadingAnchor, constant: -8), // beside a pinned rail in a narrow window, the pill shortens first
         ])
 
         // After the top strip, so a press on the pill is the pill's and never the start of a window drag.
@@ -745,6 +746,18 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
     /// A download's name, in the pill.
     func showNotice(_ text: String) {
         pill.showNotice(text)
+    }
+
+    /// The pill's left edge, which moves beside a pinned rail.
+    private lazy var pillLeading = pill.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12)
+
+    /// A rail opened by hovering covers the pill's corner, so the pill waits it out. A pinned rail leaves the page beside
+    /// it, and the pill works there. The corner is under a pinned rail, which shows the address anyway, so it's off.
+    private func placePill() {
+        let isPinned = railState.visibility == .pinned
+        pill.corner.isHidden = isPinned // first, so a pointer resting there lets go before the pill can come back for it
+        pillLeading.constant = isPinned ? Rail.inset + Rail.width + 12 : 12
+        pill.isSuppressed = railState.visibility == .hover
     }
 
     private func showSignInPopover() {

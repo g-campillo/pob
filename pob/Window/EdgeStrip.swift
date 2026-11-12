@@ -42,4 +42,11 @@ final class EdgeStrip: NSView {
         dwellTask?.cancel()
         onExit?()
     }
+
+    /// A strip hidden under the pointer gets no `mouseExited`, so hiding it counts as the pointer leaving.
+    override func viewDidHide() {
+        super.viewDidHide()
+        dwellTask?.cancel()
+        onExit?()
+    }
 }
