@@ -48,6 +48,17 @@ import Testing
         #expect(!view.isHidden)
         #expect(view.alphaValue == 1)
     }
+    /// A plain `isHidden = true` is a hide too, or the next show is taken for one already done and leaves the view hidden.
+    @Test func aViewHiddenDirectlyComesBackWhenShown() async {
+        let view = NSView()
+        withMotion(.smooth) {
+            view.setShown(true)
+            view.isHidden = true
+            view.setShown(true)
+            #expect(!view.isHidden)
+        }
+        #expect(await eventually { view.alphaValue == 1 })
+    }
 
     // MARK: The setting
 

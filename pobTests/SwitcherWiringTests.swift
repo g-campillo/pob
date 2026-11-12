@@ -857,6 +857,25 @@ private final class HeldHistory {
         #expect(controller.rail.suggestions.isHidden)
         #expect(!controller.rail.tabList.isHidden)
     }
+    /// With animations on, a list hidden at once and then faded back in mustn't be taken for one that's already showing.
+    @Test func emptyingTheFieldAgainStillBringsTheTabListBack() async throws {
+        let (controller, _) = make()
+        let rail = controller.rail
+        try withMotion(.smooth) {
+            controller.perform(.focusAddress)
+            for _ in 0..<2 {
+                try type("reload", into: rail.addressField)
+                #expect(!rail.suggestions.isHidden)
+                #expect(rail.tabList.isHidden)
+                let editor = try #require(rail.addressField.currentEditor() as? NSTextView)
+                editor.selectAll(nil)
+                editor.doCommand(by: #selector(NSResponder.deleteBackward(_:)))
+                #expect(!rail.tabList.isHidden)
+                #expect(rail.suggestions.isHidden)
+            }
+        }
+        #expect(await eventually { rail.tabList.alphaValue == 1 })
+    }
     @Test func returnWithSuggestionsShowingStillLoadsTheTypedText() async throws {
         let tabs = TabManager(profile: .temporary(), keepsSpare: false)
         let current = tabs.newTab(nil, activate: true)

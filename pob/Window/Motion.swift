@@ -51,9 +51,10 @@ private var shownKey: UInt8 = 0
 
 extension NSView {
     /// What `setShown` was last asked for. `isHidden` only catches up once a fade out ends, and the alpha lags too,
-    /// because an animation moves it a frame at a time.
+    /// because an animation moves it a frame at a time. A view hidden with a plain `isHidden = true` counts as hidden,
+    /// or the next show would be taken for one already done and leave it hidden.
     private var isMeantToShow: Bool {
-        get { objc_getAssociatedObject(self, &shownKey) as? Bool ?? !isHidden }
+        get { (objc_getAssociatedObject(self, &shownKey) as? Bool ?? true) && !isHidden }
         set { objc_setAssociatedObject(self, &shownKey, newValue, .OBJC_ASSOCIATION_RETAIN_NONATOMIC) }
     }
 
