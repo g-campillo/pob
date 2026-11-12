@@ -39,7 +39,7 @@ nonisolated enum BookmarkImport {
                 let text = decode(inner).collapsingWhitespace
                 if name == "h3" {
                     pending = text
-                } else if let url = webURL(href(in: b[nameEnd..<gt])), let host = url.host() {
+                } else if let url = webURL(attribute("href", in: b[nameEnd..<gt])), let host = url.host() {
                     let folder = stack.compactMap { $0 }.joined(separator: " / ")
                     items.append(Item(title: text.isEmpty ? host : text, url: url, folder: folder.isEmpty ? nil : folder))
                 }
@@ -61,7 +61,7 @@ nonisolated enum BookmarkImport {
         return out
     }
 
-    private static func isSpace(_ c: UInt8) -> Bool { c == 32 || (9...13).contains(c) }
+    static func isSpace(_ c: UInt8) -> Bool { c == 32 || (9...13).contains(c) }
     private static func isLetterOrDigit(_ c: UInt8) -> Bool {
         (UInt8(ascii: "a")...UInt8(ascii: "z")).contains(c | 0x20) || (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(c)
     }
@@ -76,15 +76,15 @@ nonisolated enum BookmarkImport {
         return nil
     }
 
-    /// The value of the attribute named exactly `href`, so `data-href` doesn't count.
-    private static func href(in attrs: ArraySlice<UInt8>) -> String? {
+    /// The value of the attribute named exactly `name`, so `data-href` isn't `href`. `FaviconStore` reads `<link>` tags with it too.
+    static func attribute(_ name: String, in attrs: ArraySlice<UInt8>) -> String? {
         var i = attrs.startIndex
         let end = attrs.endIndex
         while i < end {
             while i < end, isSpace(attrs[i]) || attrs[i] == UInt8(ascii: "/") { i += 1 }
             let nameStart = i
             while i < end, !isSpace(attrs[i]), attrs[i] != UInt8(ascii: "="), attrs[i] != UInt8(ascii: "/") { i += 1 }
-            let name = String(decoding: attrs[nameStart..<i], as: UTF8.self).lowercased()
+            let attributeName = String(decoding: attrs[nameStart..<i], as: UTF8.self).lowercased()
             while i < end, isSpace(attrs[i]) { i += 1 }
             guard i < end, attrs[i] == UInt8(ascii: "=") else { continue }
             i += 1
@@ -100,7 +100,7 @@ nonisolated enum BookmarkImport {
                 while i < end, !isSpace(attrs[i]) { i += 1 }
                 valueEnd = i
             }
-            if name == "href" { return String(decoding: attrs[valueStart..<valueEnd], as: UTF8.self) }
+            if attributeName == name { return String(decoding: attrs[valueStart..<valueEnd], as: UTF8.self) }
         }
         return nil
     }
@@ -112,7 +112,7 @@ nonisolated enum BookmarkImport {
     }
 
     /// `&amp;` goes last so `&amp;lt;` reads as the text `&lt;`.
-    private static func decode(_ text: String) -> String {
+    static func decode(_ text: String) -> String {
         guard text.contains("&") else { return text }
         let numeric = text.replacing(#/&#(x[0-9a-f]{1,6}|[0-9]{1,7});/#.ignoresCase()) { match in
             let digits = match.1.lowercased()

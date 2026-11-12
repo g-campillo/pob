@@ -3,6 +3,29 @@ import Foundation
 import Testing
 @testable import pob
 
+/// Answers icon requests by host, so a fetch never leaves the test.
+private nonisolated final class IconSite: URLProtocol {
+    static let png = Data(base64Encoded: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNg+P8fAAADAQH/VcGg6AAAAABJRU5ErkJggg==")!
+
+    /// Web requests only, so a `data:` page pob wrongly asked for would be read for real, and its icon link followed here.
+    override class func canInit(with request: URLRequest) -> Bool { ["http", "https"].contains(request.url?.scheme) }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+    override func startLoading() {
+        guard let client, let url = request.url else { return }
+        let (status, body): (Int, Data) = switch (url.host() ?? "", url.path()) {
+        case ("linked.example", "/"): (200, Data(#"<html><head><LINK REL="Shortcut Icon" HREF="/icon.png"></head></html>"#.utf8))
+        case ("linked.example", "/icon.png"): (200, Self.png)
+        case ("plain.example", "/"): (200, Data("<title>Plain</title>".utf8))
+        case ("plain.example", "/favicon.ico"), ("missing.example", "/favicon.ico"): (200, Self.png)
+        default: (404, Data())
+        }
+        client.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: status, httpVersion: nil, headerFields: nil)!, cacheStoragePolicy: .notAllowed)
+        client.urlProtocol(self, didLoad: body)
+        client.urlProtocolDidFinishLoading(self)
+    }
+}
+
 @Suite struct BookmarkStoreTests {
     func file() -> JSONFile<BookmarkFile> {
         JSONFile(url: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString + ".json"))
@@ -201,6 +224,75 @@ import Testing
 
     // MARK: Favicons
 
+    func iconSite() -> URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [IconSite.self]
+        return configuration
+    }
+    func iconStore(in folder: URL = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)) -> FaviconStore {
+        FaviconStore(directory: folder)
+    }
+
+    @Test func aPagesIconLinkIsFound() {
+        func icon(_ html: String) -> String? { FaviconStore.declaredIcon(in: Data(html.utf8)) }
+        #expect(icon(#"<link rel="icon" href="/a.png">"#) == "/a.png")
+        #expect(icon("<LINK REL='Shortcut Icon' HREF='/b.ico'>") == "/b.ico")
+        #expect(icon(#"<link rel="apple-touch-icon" href="/t.png"><link rel=icon href=/c.png>"#) == "/c.png")
+        #expect(icon(#"<link rel="icon" href="/q?a=1&amp;b=2">"#) == "/q?a=1&b=2")
+        #expect(icon(#"<link rel="icon" href="  /s.png ">"#) == "/s.png")
+    }
+    @Test func onlyARealIconLinkCounts() {
+        let pages = [
+            #"<link rel="stylesheet" href="/s.css">"#,
+            #"<link data-rel="icon" rel="preload" href="/x">"#,
+            "<linkx rel=icon href=/no>",
+            "<link rel=icon>",
+            "<link rel=icon href=/x",
+            "",
+        ]
+        for html in pages {
+            #expect(FaviconStore.declaredIcon(in: Data(html.utf8)) == nil, "\(html)")
+        }
+    }
+    @Test func iconLinksAreReadInLinearTime() {
+        // About 1 MB each: tags that never close, and tags with nothing in them.
+        for unit in ["<link rel=x ", "<link>"] {
+            let html = Data(String(repeating: unit, count: 1_000_000 / unit.utf8.count).utf8)
+            let clock = ContinuousClock()
+            let elapsed = clock.measure { #expect(FaviconStore.declaredIcon(in: html) == nil) }
+            #expect(elapsed < .seconds(1), "\(unit)")
+        }
+    }
+    /// That site has no `/favicon.ico`, so only the link could have given the icon.
+    @Test func aBookmarksIconComesFromTheLinkOnItsPage() async {
+        let store = iconStore()
+        await store.update(host: "linked.example", page: URL(string: "https://linked.example/")!, configuration: iconSite())
+        #expect(store.image(forHost: "linked.example") != nil)
+    }
+    @Test func aPageWithNoIconLinkFallsBackToFaviconIco() async {
+        let store = iconStore()
+        await store.update(host: "plain.example", page: URL(string: "https://plain.example/")!, configuration: iconSite())
+        #expect(store.image(forHost: "plain.example") != nil)
+    }
+    @Test func aPageThatWontLoadStillTriesFaviconIco() async {
+        let store = iconStore()
+        await store.update(host: "missing.example", page: URL(string: "https://missing.example/")!, configuration: iconSite())
+        #expect(store.image(forHost: "missing.example") != nil)
+    }
+    @Test func aSiteWithNoIconLeavesNothingBehind() async {
+        let folder = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)
+        let store = iconStore(in: folder)
+        await store.update(host: "none.example", page: URL(string: "https://none.example/")!, configuration: iconSite())
+        #expect(store.image(forHost: "none.example") == nil)
+        #expect((try? FileManager.default.contentsOfDirectory(atPath: folder.path())) ?? [] == [])
+    }
+    @Test func onlyWebPagesAreAskedForTheirIcon() async {
+        let store = iconStore()
+        for page in [URL(string: "data:text/html,<link rel=icon href=https://linked.example/icon.png>")!, URL(string: "file:///tmp/x.html")!] {
+            await store.update(host: "x.example", page: page, configuration: iconSite())
+            #expect(store.image(forHost: "x.example") == nil, "\(page)")
+        }
+    }
     @Test func iconAddressesFromThePageAreLimitedToWebAndData() {
         let pageURL = URL(string: "https://example.com/a/b")
         #expect(FaviconStore.iconURL(declared: "/i.png", page: pageURL)?.absoluteString == "https://example.com/i.png")

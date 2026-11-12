@@ -6,6 +6,8 @@ import WebKit
 final class FaviconStore {
     static let maxBytes = 1_000_000
     static let maxPixels: CGFloat = 64
+    /// The start of a page is enough. Its `<link>` tags are in its head.
+    static let pageBytes = 256_000
 
     private let directory: URL
     private var cache: [String: NSImage] = [:]
@@ -30,8 +32,21 @@ final class FaviconStore {
     /// Never leaves a failure behind but the letter tile.
     func update(host: String, from page: WKWebView) async {
         let declared = try? await page.evaluateJavaScript(#"document.querySelector('link[rel~="icon"]')?.href"#) as? String
-        guard let icon = Self.iconURL(declared: declared, page: page.url),
-              let data = await Self.fetch(icon),
+        await save(Self.iconURL(declared: declared, page: page.url), host: host, configuration: .ephemeral)
+    }
+
+    /// For a saved bookmark, which has no page open: reads the icon link at the start of its page, or falls back to
+    /// `/favicon.ico`. Only web pages are requested. A test passes a configuration that never reaches the network.
+    func update(host: String, page: URL, configuration: URLSessionConfiguration = .ephemeral) async {
+        guard let scheme = page.scheme?.lowercased(), scheme == "http" || scheme == "https" else { return }
+        let fetched = await Self.fetchPage(page, configuration: configuration)
+        let declared = fetched.flatMap { Self.declaredIcon(in: $0.html) }
+        await save(Self.iconURL(declared: declared, page: fetched?.url ?? page), host: host, configuration: configuration)
+    }
+
+    private func save(_ icon: URL?, host: String, configuration: URLSessionConfiguration) async {
+        guard let icon,
+              let data = await Self.fetch(icon, configuration: configuration),
               let png = Self.scaledPNG(from: data)
         else { return }
         do {
@@ -87,9 +102,50 @@ final class FaviconStore {
         directory.appending(path: fileName(forHost: host), directoryHint: .notDirectory)
     }
 
-    /// Ephemeral, so icon requests keep no cookies. Stops reading once the cap is passed.
-    private static func fetch(_ url: URL) async -> Data? {
-        let session = URLSession(configuration: .ephemeral)
+    /// The `href` of the first `<link>` whose `rel` has the word `icon`. The page is untrusted, so this is one forward
+    /// pass, like `BookmarkImport.parse`, and a `<link` with no `>` after it ends the scan.
+    static func declaredIcon(in html: Data) -> String? {
+        let b = Array(html)
+        var i = 0
+        while let lt = b[i...].firstIndex(of: UInt8(ascii: "<")) {
+            i = lt + 1
+            let nameEnd = lt + 5
+            guard nameEnd < b.count,
+                  zip(b[(lt + 1)..<nameEnd], "link".utf8).allSatisfy({ $0 | 0x20 == $1 }),
+                  BookmarkImport.isSpace(b[nameEnd]) || b[nameEnd] == UInt8(ascii: "/")
+            else { continue }
+            guard let gt = b[nameEnd...].firstIndex(of: UInt8(ascii: ">")) else { return nil }
+            i = gt + 1
+            let attrs = b[nameEnd..<gt]
+            let rel = BookmarkImport.attribute("rel", in: attrs)?.lowercased().split(whereSeparator: \.isWhitespace) ?? []
+            if rel.contains("icon"), let href = BookmarkImport.attribute("href", in: attrs) {
+                return BookmarkImport.decode(href).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        return nil
+    }
+
+    /// The start of the page, and the address it ended at. Anything but a 200 counts as no page, and the fallback is still tried.
+    private static func fetchPage(_ url: URL, configuration: URLSessionConfiguration) async -> (html: Data, url: URL)? {
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() } // the rest of a long page isn't wanted
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 10
+        guard let (bytes, response) = try? await session.bytes(for: request) else { return nil }
+        if let http = response as? HTTPURLResponse, http.statusCode != 200 { return nil }
+        var html = Data()
+        do {
+            for try await byte in bytes {
+                html.append(byte)
+                if html.count >= pageBytes { break }
+            }
+        } catch { return nil }
+        return (html, response.url ?? url)
+    }
+
+    /// Ephemeral, as every caller passes it, so icon requests keep no cookies. Stops reading once the cap is passed.
+    private static func fetch(_ url: URL, configuration: URLSessionConfiguration) async -> Data? {
+        let session = URLSession(configuration: configuration)
         defer { session.finishTasksAndInvalidate() }
         guard let (bytes, response) = try? await session.bytes(from: url) else { return nil }
         if let http = response as? HTTPURLResponse, http.statusCode != 200 { return nil }
