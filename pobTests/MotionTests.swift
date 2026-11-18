@@ -107,6 +107,17 @@ import Testing
         button.mouseExited(with: pointerEvent(.mouseExited))
         #expect(button.layer?.backgroundColor == nil)
     }
+    @Test func aRoundButtonsFillIsACircle() {
+        let button = borderless()
+        button.isRound = true
+        button.mouseEntered(with: pointerEvent(.mouseEntered))
+        #expect(button.layer?.cornerRadius == 14)
+    }
+    @Test func theRailsIconButtonsHaveRoundFills() {
+        let rail = Rail(frame: NSRect(x: 0, y: 0, width: 240, height: 600))
+        let round = rail.subviewsDeep.compactMap { $0 as? HoverButton }.filter(\.isRound).compactMap { $0.accessibilityLabel() }
+        #expect(Set(round) == ["Back", "Forward", "Reload", "New Folder", "Add Bookmark", "Downloads", "Settings"])
+    }
     @Test func aButtonThatCantBeClickedShowsNoFill() {
         let button = borderless()
         button.isEnabled = false

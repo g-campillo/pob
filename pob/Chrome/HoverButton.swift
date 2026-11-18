@@ -2,6 +2,8 @@ import AppKit
 
 /// A button that shows it can be clicked: a pointing hand over it, and for one with no border of its own, a fill behind it.
 final class HoverButton: NSButton {
+    /// A circle behind the button instead of a rounded square. For a button that shows only an icon.
+    var isRound = false
     private var hoverArea: NSTrackingArea?
     private var isHovered = false {
         didSet { showFill() }
@@ -55,7 +57,7 @@ final class HoverButton: NSButton {
     private func showFill() {
         guard !isBordered else { return }
         wantsLayer = true
-        layer?.cornerRadius = min(bounds.height / 4, 8)
+        layer?.cornerRadius = isRound ? min(bounds.width, bounds.height) / 2 : min(bounds.height / 4, 8)
         layer?.cornerCurve = .continuous
         effectiveAppearance.performAsCurrentDrawingAppearance {
             layer?.backgroundColor = isHovered && isEnabled ? NSColor.quaternaryLabelColor.cgColor : nil

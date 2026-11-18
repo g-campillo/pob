@@ -562,6 +562,12 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         navigate(.url(bookmark.url))
     }
 
+    /// A ⌘-click opens a new tab in the background, as a ⌘-click on a link does. With no tab, it opens as a click does.
+    func openBookmarkInNewTab(_ bookmark: Bookmark) {
+        guard tab != nil else { return openBookmark(bookmark) }
+        tabs.newTab(.url(bookmark.url), activate: false)
+    }
+
     /// A new bookmark when `bookmark` is nil, filled in from the page. A new address fetches its icon.
     private func showBookmarkEditor(for bookmark: Bookmark?, focus: BookmarkEditor.Field, from anchor: NSView) {
         let store = tabs.profile.bookmarks
@@ -719,6 +725,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         let bookmarks = tabs.profile.bookmarks
         rail.bookmarks.favicons = tabs.profile.favicons
         rail.bookmarks.onOpen = { [weak self] in self?.openBookmark($0) }
+        rail.bookmarks.onOpenInNewTab = { [weak self] in self?.openBookmarkInNewTab($0) }
         rail.bookmarks.onMove = { bookmarks.move(id: $0, to: $1) }
         rail.bookmarks.onDelete = { bookmarks.remove(id: $0) }
         rail.bookmarks.onAdd = { [weak self] in self?.showBookmarkEditor(for: nil, focus: .name, from: $0) }

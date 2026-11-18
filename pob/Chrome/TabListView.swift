@@ -210,6 +210,13 @@ private final class TabRow: NSView {
     private let tile = NSImageView()
     private let label = NSTextField(labelWithString: "")
     private let closeButton = HoverButton()
+    /// The fill shows on the active tab and on the row under the pointer.
+    private var isActive = false {
+        didSet { showFill() }
+    }
+    private var isHovered = false {
+        didSet { showFill() }
+    }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -255,7 +262,7 @@ private final class TabRow: NSView {
     func configure(_ tab: ShownTab) {
         label.stringValue = tab.title
         label.textColor = tab.isActive ? .labelColor : .secondaryLabelColor
-        fill.isHidden = !tab.isActive
+        isActive = tab.isActive
         tile.image = tab.icon
         setAccessibilityLabel(tab.title)
     }
@@ -265,6 +272,14 @@ private final class TabRow: NSView {
         super.prepareForReuse()
         closeButton.alphaValue = 0
         closeButton.resetHover()
+        isHovered = false
+    }
+
+    /// A row hidden under the pointer gets no `mouseExited`, so it would come back with the hover on.
+    override func viewDidHide() {
+        super.viewDidHide()
+        closeButton.alphaValue = 0
+        isHovered = false
     }
 
     /// The whole row is a click target.
@@ -276,8 +291,17 @@ private final class TabRow: NSView {
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
     }
 
-    override func mouseEntered(with event: NSEvent) { Motion.animate(Motion.fadeIn) { closeButton.alphaValue = 1 } }
-    override func mouseExited(with event: NSEvent) { Motion.animate(Motion.fadeOut) { closeButton.alphaValue = 0 } }
+    override func mouseEntered(with event: NSEvent) {
+        isHovered = true
+        Motion.animate(Motion.fadeIn) { closeButton.alphaValue = 1 }
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovered = false
+        Motion.animate(Motion.fadeOut) { closeButton.alphaValue = 0 }
+    }
+
+    private func showFill() { fill.isHidden = !(isActive || isHovered) }
 
     @objc private func closePressed() { onClose?() }
 }

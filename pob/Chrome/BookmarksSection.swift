@@ -31,6 +31,8 @@ final class BookmarksSection: NSView, NSTableViewDataSource, NSTableViewDelegate
     static let maxWindowShare: CGFloat = 0.4
 
     var onOpen: ((Bookmark) -> Void)?
+    /// A click with ⌘ held.
+    var onOpenInNewTab: ((Bookmark) -> Void)?
     /// The view is where an editor should point from.
     var onRename: ((Bookmark, NSView) -> Void)?
     var onEditAddress: ((Bookmark, NSView) -> Void)?
@@ -160,15 +162,19 @@ final class BookmarksSection: NSView, NSTableViewDataSource, NSTableViewDelegate
         showRows(animated: animated)
     }
 
-    /// Takes the same path as a click: a folder opens or closes, and a bookmark opens.
-    func clickRow(_ index: Int) {
+    /// Takes the same path as a click: a folder opens or closes, and a bookmark opens. With ⌘ held, a bookmark opens in a new tab.
+    func clickRow(_ index: Int, modifiers: NSEvent.ModifierFlags = []) {
         guard rows.indices.contains(index) else { return }
         switch rows[index] {
         case .folder(let name, let isOpen):
             if isOpen { openFolders.remove(name) } else { openFolders.insert(name) }
             showRows(animated: true)
         case .bookmark(let bookmark, _):
-            onOpen?(bookmark)
+            if modifiers.contains(.command) {
+                onOpenInNewTab?(bookmark)
+            } else {
+                onOpen?(bookmark)
+            }
         }
     }
 
@@ -248,6 +254,7 @@ final class BookmarksSection: NSView, NSTableViewDataSource, NSTableViewDelegate
         let image = NSImage(systemSymbolName: symbol, accessibilityDescription: label) ?? NSImage()
         let button = HoverButton(image: image, target: self, action: action)
         button.isBordered = false
+        button.isRound = true
         button.toolTip = label
         button.setAccessibilityLabel(label)
         button.widthAnchor.constraint(equalToConstant: 28).isActive = true
@@ -258,7 +265,7 @@ final class BookmarksSection: NSView, NSTableViewDataSource, NSTableViewDelegate
     @objc private func togglePressed() { setExpanded(!isExpanded, animated: true) }
     @objc private func addPressed() { onAdd?(addButton) }
     @objc private func newFolderPressed() { onNewFolder?(newFolderButton) }
-    @objc private func rowClicked() { clickRow(table.clickedRow) }
+    @objc private func rowClicked() { clickRow(table.clickedRow, modifiers: NSApp.currentEvent?.modifierFlags ?? []) }
 
     // MARK: Right-click
 

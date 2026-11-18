@@ -834,6 +834,25 @@ private final class HeldHistory {
         try type(text, into: controller.rail.addressField)
     }
 
+    /// One click selects the whole address, so typing replaces it.
+    @Test func aClickInTheAddressFieldSelectsTheWholeAddress() throws {
+        let (controller, _) = make()
+        controller.revealRailImmediately()
+        let window = try #require(controller.window)
+        let field = controller.rail.addressField
+        field.stringValue = "https://localhost/page"
+        window.contentView?.layoutSubtreeIfNeeded()
+        let point = field.convert(NSPoint(x: 20, y: field.bounds.midY), to: nil)
+        func mouse(_ type: NSEvent.EventType) -> NSEvent {
+            NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+        }
+        window.postEvent(mouse(.leftMouseUp), atStart: false)
+        field.mouseDown(with: mouse(.leftMouseDown))
+        let editor = try #require(field.currentEditor() as? NSTextView)
+        #expect(editor.selectedRange() == NSRange(location: 0, length: field.stringValue.utf16.count))
+        try type("example.com", into: field)
+        #expect(field.stringValue == "example.com")
+    }
     @Test func typingInTheAddressFieldReplacesTheTabListWithSuggestions() throws {
         let (controller, _) = make()
         try editAddress("reload", in: controller)

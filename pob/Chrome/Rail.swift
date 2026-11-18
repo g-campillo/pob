@@ -208,6 +208,7 @@ final class Rail: NSView, NSTextFieldDelegate {
         let image = NSImage(systemSymbolName: symbol, accessibilityDescription: label) ?? NSImage()
         let button = HoverButton(image: image, target: self, action: action)
         button.isBordered = false
+        button.isRound = true
         button.setAccessibilityLabel(label)
         button.widthAnchor.constraint(equalToConstant: 28).isActive = true
         button.heightAnchor.constraint(equalToConstant: 28).isActive = true
@@ -282,6 +283,16 @@ private final class LiteralTextFieldCell: NSTextFieldCell {
 
 private final class AddressField: LiteralTextField {
     var onFocus: (() -> Void)?
+
+    /// The first click selects the whole address, so typing replaces it. A drag still selects only what it covers.
+    /// While the field is in use, clicks go to its field editor and place the caret as usual.
+    override func mouseDown(with event: NSEvent) {
+        let wasEditing = currentEditor() != nil
+        super.mouseDown(with: event) // returns after the mouse comes up
+        if !wasEditing, let editor = currentEditor(), editor.selectedRange.length == 0 {
+            editor.selectAll(nil)
+        }
+    }
 
     override func becomeFirstResponder() -> Bool {
         let accepted = super.becomeFirstResponder()

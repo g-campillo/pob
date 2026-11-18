@@ -368,6 +368,25 @@ private nonisolated final class IconSite: URLProtocol {
         #expect(tabs.list.activeID == activeBefore)
         #expect(await eventually { controller.tab?.webView.url == target })
     }
+    @Test func aCommandClickOpensTheBookmarkInABackgroundTab() async throws {
+        let tabs = TabManager(profile: .temporary(), keepsSpare: false)
+        tabs.newTab(nil, activate: true)
+        let controller = WindowController(appearance: testAppearance(), tabs: tabs)
+        let target = URL(string: "data:text/html,hi")!
+        let activeBefore = tabs.list.activeID
+        controller.openBookmarkInNewTab(Bookmark(id: UUID(), title: "Hi", url: target, folder: nil))
+        #expect(tabs.list.records.count == 2)
+        #expect(tabs.list.activeID == activeBefore)
+        let opened = try #require(tabs.list.records.last?.id)
+        #expect(await eventually { tabs.liveTab(opened)?.webView.url == target })
+    }
+    @Test func aCommandClickWithNoTabOpensOne() {
+        let tabs = TabManager(profile: .temporary(), keepsSpare: false)
+        let controller = WindowController(appearance: testAppearance(), tabs: tabs)
+        controller.openBookmarkInNewTab(Bookmark(id: UUID(), title: "Hi", url: URL(string: "data:text/html,hi")!, folder: nil))
+        #expect(tabs.list.records.count == 1)
+        #expect(tabs.list.activeID != nil)
+    }
     @Test func aBookmarkClickWithNoTabOpensOne() {
         let tabs = TabManager(profile: .temporary(), keepsSpare: false)
         let model = AppearanceModel(store: SettingsStore(fileURL: FileManager.default.temporaryDirectory.appending(path: UUID().uuidString)), reduceTransparency: false)

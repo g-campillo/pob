@@ -124,6 +124,7 @@ import Testing
         window.displayIfNeeded()
         let table = try table(in: view)
         let hovered = try #require(table.view(atColumn: 0, row: 0, makeIfNecessary: false))
+        hovered.mouseEntered(with: pointerEvent(.mouseEntered))
         closeButton(of: hovered)?.alphaValue = 1
 
         table.scrollRowToVisible(39)
@@ -132,6 +133,7 @@ import Testing
         let rows = (shown.lowerBound..<shown.upperBound).compactMap { table.view(atColumn: 0, row: $0, makeIfNecessary: false) }
         #expect(rows.contains { $0 === hovered })
         #expect(rows.allSatisfy { closeButton(of: $0)?.alphaValue == 0 })
+        #expect(rows.allSatisfy { !hasFill($0) }) // the active tab is row 0, out of view
     }
     /// The rail is hidden most of the time, and whatever a tab did meanwhile has to be there when it opens.
     @Test func aTitleChangeWhileHiddenIsThereWhenTheListComesBack() throws {
@@ -178,6 +180,38 @@ import Testing
 
         view.update(records: records, activeID: records[20].id)
         #expect(table.visibleRect.contains(table.rect(ofRow: 20)))
+    }
+    @Test func hoveringATabFillsItsRow() throws {
+        let records = [TabRecord(title: "One"), TabRecord(title: "Two")]
+        let view = listShowing(records, active: records[0].id)
+        let rows = try rowViews(in: view)
+        rows[1].mouseEntered(with: pointerEvent(.mouseEntered))
+        #expect(rows.map(hasFill) == [true, true])
+        rows[1].mouseExited(with: pointerEvent(.mouseExited))
+        #expect(rows.map(hasFill) == [true, false])
+
+        rows[0].mouseEntered(with: pointerEvent(.mouseEntered)) // the active row keeps its fill when the pointer goes
+        rows[0].mouseExited(with: pointerEvent(.mouseExited))
+        #expect(rows.map(hasFill) == [true, false])
+    }
+    /// An unread count ticks in the title of the row the pointer may be on.
+    @Test func theHoverFillStaysThroughAnUpdate() throws {
+        var records = [TabRecord(title: "One"), TabRecord(title: "Two")]
+        let view = listShowing(records, active: records[0].id)
+        try rowViews(in: view)[1].mouseEntered(with: pointerEvent(.mouseEntered))
+        records[1].title = "(1) Two"
+        view.update(records: records, activeID: records[0].id)
+        #expect(try rowViews(in: view).map(hasFill) == [true, true])
+    }
+    @Test func aRowHiddenUnderThePointerComesBackWithoutTheHover() throws {
+        let records = [TabRecord(title: "One"), TabRecord(title: "Two")]
+        let view = listShowing(records, active: records[0].id)
+        let rows = try rowViews(in: view)
+        rows[1].mouseEntered(with: pointerEvent(.mouseEntered))
+        view.isHidden = true
+        view.isHidden = false
+        #expect(rows.map(hasFill) == [true, false])
+        #expect(closeButton(of: rows[1])?.alphaValue == 0)
     }
     @Test func switchingTabsMovesTheFill() throws {
         let records = [TabRecord(title: "One"), TabRecord(title: "Two")]

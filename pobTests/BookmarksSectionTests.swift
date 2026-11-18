@@ -119,6 +119,41 @@ import Testing
         section.clickRow(99)
         #expect(opened == [a])
     }
+    @Test func aCommandClickOpensABookmarkInANewTab() {
+        let section = showing(folders: ["Work"], bookmarks: [a, w1])
+        var opened: [Bookmark] = []
+        var inNewTab: [Bookmark] = []
+        section.onOpen = { opened.append($0) }
+        section.onOpenInNewTab = { inNewTab.append($0) }
+        section.clickRow(1, modifiers: .command)
+        #expect(inNewTab == [a])
+        #expect(opened.isEmpty)
+
+        section.clickRow(0, modifiers: .command) // a folder only opens
+        #expect(section.rows.first == .folder("Work", isOpen: true))
+        #expect(inNewTab == [a])
+    }
+    /// Through the table, so the ⌘ comes from the click itself.
+    @Test(arguments: [false, true]) func aRealClickOnABookmarkHonoursCommand(command: Bool) throws {
+        let (window, section) = try inWindow(bookmarks: [a])
+        defer { window.close() }
+        section.setExpanded(true, animated: false)
+        window.contentView?.layoutSubtreeIfNeeded()
+        let table = try table(in: section)
+        let row = table.rect(ofRow: 0)
+        let point = table.convert(NSPoint(x: row.midX, y: row.midY), to: nil)
+        func mouse(_ type: NSEvent.EventType) -> NSEvent {
+            NSEvent.mouseEvent(with: type, location: point, modifierFlags: command ? .command : [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!
+        }
+        var opened: [Bookmark] = []
+        var inNewTab: [Bookmark] = []
+        section.onOpen = { opened.append($0) }
+        section.onOpenInNewTab = { inNewTab.append($0) }
+        window.postEvent(mouse(.leftMouseUp), atStart: false)
+        table.mouseDown(with: mouse(.leftMouseDown))
+        #expect(inNewTab == (command ? [a] : []))
+        #expect(opened == (command ? [] : [a]))
+    }
     @Test func aFolderThatGoesIsForgottenWhenItComesBack() {
         let section = showing(folders: ["Work"], bookmarks: [w1])
         section.clickRow(0)
