@@ -1,0 +1,80 @@
+{
+  "fill": {
+    "linear-gradient": [
+      "srgb:0.2196078431372549,0.7411764705882353,0.9725490196078431,1",
+      "srgb:0.30980392156862746,0.27450980392156865,0.8980392156862745,1"
+    ],
+    "orientation": {
+      "start": {
+        "x": 0.5,
+        "y": 0
+      },
+      "stop": {
+        "x": 0.5,
+        "y": 1
+      }
+    }
+  },
+  "fill-specializations": [
+    {
+      "appearance": "dark",
+      "value": {
+        "linear-gradient": [
+          "srgb:0.17254901960784313,0.17254901960784313,0.18823529411764706,1",
+          "srgb:0.054901960784313725,0.054901960784313725,0.06274509803921569,1"
+        ],
+        "orientation": {
+          "start": {
+            "x": 0.5,
+            "y": 0
+          },
+          "stop": {
+            "x": 0.5,
+            "y": 1
+          }
+        }
+      }
+    }
+  ],
+  "groups": [
+    {
+      "name": "Bowl",
+      "layers": [
+        {
+          "image-name": "bowl.svg",
+          "name": "Bowl"
+        }
+      ],
+      "specular": true,
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.4
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.4
+      }
+    },
+    {
+      "name": "Stem",
+      "layers": [
+        {
+          "image-name": "stem.svg",
+          "name": "Stem"
+        }
+      ],
+      "specular": true,
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.4
+      },
+      "translucency": {
+        "enabled": false,
+        "value": 0
+      }
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}
