@@ -1,12 +1,8 @@
 import AppKit
 
-/// A small glass pill at the bottom left. It names the page's host for a moment after a load and while the pointer rests in the window's bottom-left corner, and clicking it copies the address. A load that takes a while shows with a bar under the host.
+/// A small glass pill at the bottom left. Holding Shift brings it up with the page's host, and clicking it then copies the address. Without Shift it only comes up for a notice, such as a download's name, or for a load that takes a while, with a bar under the host, and clicks go through it to the page.
 final class DomainPill: NSView {
     static let visibleDuration: Duration = .seconds(2)
-    /// The band along the window's bottom edge, from its left corner, where resting the pointer brings the pill up.
-    /// It reaches a little way under the pill, so the pointer moves onto the pill without leaving both, and no further,
-    /// so a link under the pill still takes a click.
-    static let cornerSize = NSSize(width: 200, height: 18)
     /// A load has to run this long before the pill shows it, so a quick one never flashes a bar.
     static let progressDelay: Duration = .milliseconds(500)
     private static let fadeDuration: TimeInterval = 0.2
@@ -17,25 +13,24 @@ final class DomainPill: NSView {
         return host
     }
 
-    /// True while a rail opened by hovering covers the corner, so the pill stays out of its way. A pinned rail leaves it be.
+    /// True while a rail opened by hovering covers the pill, so the pill stays out of its way. A pinned rail leaves it be.
     var isSuppressed = false {
         didSet {
             if isSuppressed {
                 hide(animated: false)
-            } else if oldValue, isHeld { // the pointer still in the corner gets the pill back
+            } else if oldValue, isHeld { // Shift still held, or a load still running, gets the pill back
                 reveal()
             }
         }
     }
-    /// The pointer is resting in the corner, and the pill stays up until it leaves.
-    var isPointerInCorner = false {
+    /// Shift is held on its own. The pill comes up with the host and takes clicks until Shift comes up.
+    var isShiftHeld = false {
         didSet {
-            guard isPointerInCorner != oldValue else { return }
-            if isPointerInCorner { reveal() } else { hideIfFree() }
+            guard isShiftHeld != oldValue else { return }
+            window?.invalidateCursorRects(for: self) // the hand cursor only shows while the pill takes clicks
+            if isShiftHeld { reveal() } else { hideIfFree() }
         }
     }
-    /// Watches the corner for the pointer. The window places it, and it never takes clicks.
-    let corner = EdgeStrip()
     /// The address the pill names: the page's, or the one a showing load is going to. A notice never changes it.
     private(set) var currentURL: URL?
     /// A fade out is running. Its completion hides the pill only if nothing showed it again first.
@@ -111,18 +106,17 @@ final class DomainPill: NSView {
         ])
         setAccessibilityRole(.button)
         setAccessibilityLabel("Copy address")
-        corner.onDwell = { [weak self] in self?.isPointerInCorner = true }
-        corner.onExit = { [weak self] in self?.isPointerInCorner = false }
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
 
-    /// Shows the host of a freshly loaded page, or hides the pill when the page has none.
+    /// Takes the page's address, which the pill names while Shift is held and a click copies. A load no longer brings the
+    /// pill up, so it lets go of the pill unless something holds it, and a page with no host hides it.
     func show(url: URL?) {
         currentURL = url
         guard Self.displayHost(for: url) != nil else { return hide(animated: false) }
-        present(nil, for: visibleFor)
+        if isHeld { reveal() } else { hideIfFree() }
     }
 
     /// Shows text for the same time, such as a download's filename. The page's address stays as it was.
@@ -131,7 +125,7 @@ final class DomainPill: NSView {
     }
 
     /// Follows the active page's load. One still running after `progressDelay` brings the pill up with the bar under the
-    /// host it's going to, and once it ends the pill shows that host for `visibleFor`, like any finished load.
+    /// host it's going to, and once it ends the pill goes, unless a notice or Shift still holds it.
     func update(url: URL?, progress: Double, isLoading: Bool) {
         guard isLoading else { return endLoad(at: url) }
         let starting = load == nil
@@ -148,8 +142,8 @@ final class DomainPill: NSView {
         }
     }
 
-    /// Another page came forward, as on a tab switch: its host for a moment, and its own load from the start,
-    /// without the bar of the page before.
+    /// Another page came forward, as on a tab switch: its address, and its own load from the start, without the bar of
+    /// the page before.
     func showPage(url: URL?, progress: Double, isLoading: Bool) {
         progressTask?.cancel()
         load = nil
@@ -167,8 +161,8 @@ final class DomainPill: NSView {
 
     // MARK: Showing and hiding
 
-    /// A load showing, or the pointer in the corner, keeps the pill up past any clock.
-    private var isHeld: Bool { showsProgress || isPointerInCorner }
+    /// A load showing, or Shift held, keeps the pill up past any clock.
+    private var isHeld: Bool { showsProgress || isShiftHeld }
 
     /// Shows a notice, or the host when there's none, for `duration`.
     private func present(_ message: String?, for duration: Duration, holdsOnHover: Bool = true) {
@@ -214,9 +208,10 @@ final class DomainPill: NSView {
         if isHeld { reveal() } else { hide(animated: true) }
     }
 
-    /// Hides the pill once nothing keeps it up: no clock, no pointer on it, and nothing else holding it.
+    /// Hides the pill once nothing keeps it up: no clock, and nothing holding it. The pointer resting on it doesn't
+    /// count, so letting go of Shift hides the pill even with the pointer over it.
     private func hideIfFree() {
-        guard !isOnClock, !isHovered, !isHeld else { return }
+        guard !isOnClock, !isHeld else { return }
         hide(animated: true)
     }
 
@@ -234,8 +229,8 @@ final class DomainPill: NSView {
         reveal()
     }
 
-    /// However the load ended, one that showed settles into the page's host for `visibleFor`. Its bar fills, fades and
-    /// takes its row with it.
+    /// However the load ended, one that showed goes once it's done, unless a notice or Shift still holds the pill. Its
+    /// bar fills, fades and takes its row with it.
     private func endLoad(at url: URL?) {
         progressTask?.cancel()
         load = nil
@@ -243,10 +238,10 @@ final class DomainPill: NSView {
         showsProgress = false
         currentURL = url
         bar.set(1, animated: true) { [weak self] in self?.fadeBar() }
-        if isOnClock { // a notice keeps the rest of its time. A host on its clock changes to where the page landed
+        if isOnClock || isHeld { // a notice keeps the rest of its time, and a held Shift names where the page landed
             reveal()
         } else {
-            present(nil, for: visibleFor)
+            hide(animated: true)
         }
     }
 
@@ -308,13 +303,17 @@ final class DomainPill: NSView {
 
     // MARK: Pointer
 
+    /// Only a held Shift lets the pill take a click. Otherwise the click goes through it to the page.
     override func hitTest(_ point: NSPoint) -> NSView? {
-        !isHidden && bounds.contains(convert(point, from: superview)) ? self : nil
+        isShiftHeld && !isHidden && bounds.contains(convert(point, from: superview)) ? self : nil
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+    override func resetCursorRects() {
+        guard isShiftHeld else { return } // a pill that lets clicks through leaves the page's cursor alone
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
 
     override func mouseDown(with event: NSEvent) {
         guard currentURL != nil else { return }

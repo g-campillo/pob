@@ -1,7 +1,7 @@
 import AppKit
 
 /// Back and forward at the top left, where the window buttons sit while the rail is open. The rail has its own pair,
-/// so the window only shows this one while the rail is away.
+/// so the window only shows this one while the rail is away, and only while Shift is held, so it never sits over the page.
 final class NavigationPill: NSView {
     /// From the window's top and left edges. Half the height on top of this makes the window's corner, so the two curves run side by side.
     static let inset: CGFloat = 12

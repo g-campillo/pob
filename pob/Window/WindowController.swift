@@ -10,6 +10,8 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
     let switcher = SwitcherView()
     let backdrop = BackdropView()
     let pill = DomainPill()
+    /// Holding Shift on its own brings up both pills and lets them take clicks.
+    let shiftHold = ShiftHold()
     let findBar = FindBar()
     let privateBadge = PrivateBadge()
     private(set) var usesFallbackBlur = false
@@ -77,6 +79,11 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         connectTabs()
         connectSwitcher()
         connectFindBar()
+        shiftHold.onChange = { [weak self] held in
+            self?.pill.isShiftHeld = held
+            self?.updateNavigationPill()
+        }
+        shiftHold.watch(window)
         setWindowButtonsVisible(false)
         appearance.addObserver { [weak self] in self?.applyAppearance() }
         tabs.profile.bookmarks.addObserver { [weak self] in self?.updateRailContents() }
@@ -145,7 +152,13 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
 
     func windowWillClose(_ notification: Notification) {
         isClosed = true
+        shiftHold.stop()
         onClose?()
+    }
+
+    /// Another window or app has the keyboard now, so Shift coming up would never reach this one.
+    func windowDidResignKey(_ notification: Notification) {
+        shiftHold.reset()
     }
 
     /// The rail's corner plus its margin, so the two curves run side by side.
@@ -382,10 +395,11 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
     }
 
     /// The rail has its own back and forward, so the pill is only up while the rail is away. A window with no page has nowhere to go.
+    /// It also waits for Shift, so it never sits over the page.
     private func updateNavigationPill() {
         let webView = tab?.webView
         navigationPill.update(canGoBack: webView?.canGoBack ?? false, canGoForward: webView?.canGoForward ?? false)
-        navigationPill.setShown(!railIsOut && webView != nil)
+        navigationPill.setShown(!railIsOut && webView != nil && shiftHold.isHeld)
     }
 
     private func buildContent(in window: NSWindow) {
@@ -424,7 +438,7 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
 
         // After the top strip, so a press on the pill is the pill's and never the start of a window drag.
         navigationPill.translatesAutoresizingMaskIntoConstraints = false
-        navigationPill.isHidden = tab == nil // where the first update leaves it, so a new window doesn't fade it
+        navigationPill.isHidden = true // Shift isn't held yet, so this is where the first update leaves it and a new window doesn't fade it
         contentView.addSubview(navigationPill)
         NSLayoutConstraint.activate([
             navigationPill.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: NavigationPill.inset),
@@ -443,18 +457,15 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
         contentView.addSubview(rail)
 
         // It stops short of the back and forward pill, so a pointer on its way to Back can't open the rail and put the
-        // close button there. The window's very corner brings up the url pill, so the strip starts above it.
+        // close button there.
         edgeStrip.frame = NSRect(
             x: 0,
-            y: DomainPill.cornerSize.height,
+            y: 0,
             width: EdgeStrip.width,
-            height: contentView.bounds.height - DomainPill.cornerSize.height - NavigationPill.clearance
+            height: contentView.bounds.height - NavigationPill.clearance
         )
         edgeStrip.autoresizingMask = [.height]
         contentView.addSubview(edgeStrip)
-
-        pill.corner.frame = NSRect(origin: .zero, size: DomainPill.cornerSize)
-        contentView.addSubview(pill.corner)
 
         findBar.translatesAutoresizingMaskIntoConstraints = false
         findBar.isHidden = true
@@ -838,10 +849,9 @@ final class WindowController: NSWindowController, NSPopoverDelegate, NSWindowDel
     private lazy var pillLeading = pill.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12)
 
     /// A rail opened by hovering covers the pill's corner, so the pill waits it out. A pinned rail leaves the page beside
-    /// it, and the pill works there. The corner is under a pinned rail, which shows the address anyway, so it's off.
+    /// it, and the pill works there.
     private func placePill() {
         let isPinned = railState.visibility == .pinned
-        pill.corner.isHidden = isPinned // first, so a pointer resting there lets go before the pill can come back for it
         pillLeading.constant = isPinned ? Rail.inset + Rail.width + 12 : 12
         pill.isSuppressed = railState.visibility == .hover
     }

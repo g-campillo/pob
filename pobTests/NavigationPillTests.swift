@@ -83,8 +83,11 @@ func pillButton(_ label: String, in pill: NavigationPill) -> NSButton? {
 }
 
 @Suite struct NavigationPillWindowTests {
+    /// Shift is held, because the pill only comes up for it.
     func controller(_ tabs: TabManager) -> WindowController {
-        WindowController(appearance: testAppearance(), tabs: tabs)
+        let controller = WindowController(appearance: testAppearance(), tabs: tabs)
+        holdShift(in: controller)
+        return controller
     }
 
     func controller() -> WindowController {
@@ -102,7 +105,7 @@ func pillButton(_ label: String, in pill: NavigationPill) -> NSButton? {
         return (tabs, first)
     }
 
-    /// The window's own strip along its left edge. Another, wider `EdgeStrip` can sit along the bottom.
+    /// The window's own strip along its left edge.
     func railStrip(in content: NSView) -> EdgeStrip? {
         content.subviews.compactMap { $0 as? EdgeStrip }.first { $0.frame.width == EdgeStrip.width }
     }

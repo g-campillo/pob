@@ -29,12 +29,14 @@ import Testing
         let pill = DomainPill(frame: .zero)
         pill.isSuppressed = true
         pill.show(url: URL(string: "https://example.com"))
+        pill.isShiftHeld = true
         #expect(pill.isHidden)
     }
 
     @Test func aPageWithNoHostHidesTheOldHost() {
         let pill = DomainPill(frame: .zero)
         pill.show(url: URL(string: "https://example.com"))
+        pill.isShiftHeld = true
         #expect(!pill.isHidden)
         pill.show(url: URL(string: "about:blank"))
         #expect(pill.isHidden)
@@ -42,6 +44,7 @@ import Testing
     @Test func openingTheRailHidesTheShownPillAtOnce() {
         let pill = DomainPill(frame: .zero)
         pill.show(url: URL(string: "https://example.com"))
+        pill.isShiftHeld = true
         pill.isSuppressed = true
         #expect(pill.isHidden)
     }
@@ -81,100 +84,73 @@ import Testing
         let pill = DomainPill(frame: .zero)
         pill.reducesMotion = { true }
         pill.visibleFor = .milliseconds(50)
-        pill.show(url: URL(string: "https://example.com"))
+        pill.showNotice("a.zip")
         pill.mouseEntered(with: event(.mouseEntered))
         pill.isSuppressed = true
         pill.isSuppressed = false
-        pill.show(url: URL(string: "https://example.com"))
+        pill.showNotice("a.zip")
         #expect(await eventually { pill.isHidden })
     }
 
     private func text(of pill: DomainPill) -> String? {
         pill.subviewsDeep.compactMap { $0 as? NSTextField }.first?.stringValue
     }
-    @Test func restingInTheCornerShowsTheHostUntilThePointerLeaves() async {
+    @Test func holdingShiftShowsTheHostUntilItComesUp() {
         let pill = DomainPill(frame: .zero)
         pill.reducesMotion = { true }
-        pill.visibleFor = .milliseconds(20)
         pill.show(url: URL(string: "https://example.com"))
-        #expect(await eventually { pill.isHidden })
-        pill.isPointerInCorner = true
+        #expect(pill.isHidden) // a load alone no longer brings it up
+        pill.isShiftHeld = true
         #expect(!pill.isHidden)
         #expect(text(of: pill) == "example.com")
-        pill.isPointerInCorner = false
+        pill.isShiftHeld = false
         #expect(pill.isHidden)
     }
-    @Test func theCornerHoldsThePillPastItsTime() async throws {
+    @Test func lettingGoOfShiftLeavesANoticeOnItsClock() {
         let pill = DomainPill(frame: .zero)
-        pill.reducesMotion = { true }
-        pill.visibleFor = .milliseconds(20)
-        pill.show(url: URL(string: "https://example.com"))
-        pill.isPointerInCorner = true
-        try await Task.sleep(for: .milliseconds(100))
-        #expect(!pill.isHidden)
-        pill.isPointerInCorner = false
-        #expect(pill.isHidden)
-    }
-    @Test func leavingTheCornerLeavesAShowStillOnItsClock() {
-        let pill = DomainPill(frame: .zero)
-        pill.show(url: URL(string: "https://example.com"))
-        pill.isPointerInCorner = true
-        pill.isPointerInCorner = false
+        pill.showNotice("a.zip")
+        pill.isShiftHeld = true
+        pill.isShiftHeld = false
         #expect(!pill.isHidden)
     }
-    @Test func aNoticeInTheCornerGivesWayToTheHost() async {
+    @Test func aNoticeWhileShiftIsHeldGivesWayToTheHost() async {
         let pill = DomainPill(frame: .zero)
         pill.visibleFor = .milliseconds(20)
         pill.show(url: URL(string: "https://example.com"))
-        pill.isPointerInCorner = true
+        pill.isShiftHeld = true
         pill.showNotice("a.zip")
         #expect(text(of: pill) == "a.zip")
         #expect(await eventually { text(of: pill) == "example.com" })
         #expect(!pill.isHidden)
     }
-    @Test func theCornerShowsNothingWhileTheRailIsOpenAndThePillComesBackAfter() {
+    @Test func shiftShowsNothingWhileTheRailIsOpenAndThePillComesBackAfter() {
         let pill = DomainPill(frame: .zero)
         pill.show(url: URL(string: "https://example.com"))
         pill.isSuppressed = true
-        pill.isPointerInCorner = true
+        pill.isShiftHeld = true
         #expect(pill.isHidden)
         pill.isSuppressed = false
         #expect(!pill.isHidden)
     }
-    @Test func theCornerShowsNothingWithoutAPage() {
+    @Test func shiftShowsNothingWithoutAPage() {
         let pill = DomainPill(frame: .zero)
-        pill.isPointerInCorner = true
+        pill.isShiftHeld = true
         #expect(pill.isHidden)
     }
-    @Test func movingFromTheCornerOntoThePillKeepsIt() async {
+    @Test func lettingGoOfShiftHidesThePillEvenUnderThePointer() {
         let pill = DomainPill(frame: .zero)
         pill.reducesMotion = { true }
-        pill.visibleFor = .milliseconds(20)
         pill.show(url: URL(string: "https://example.com"))
-        #expect(await eventually { pill.isHidden })
-        pill.isPointerInCorner = true
+        pill.isShiftHeld = true
         pill.mouseEntered(with: event(.mouseEntered))
-        pill.isPointerInCorner = false
-        #expect(!pill.isHidden)
-        pill.mouseExited(with: event(.mouseExited))
-        #expect(pill.isHidden)
-    }
-    @Test func dwellingInTheCornerBringsThePillUp() async {
-        let pill = DomainPill(frame: .zero)
-        pill.reducesMotion = { true }
-        pill.visibleFor = .milliseconds(20)
-        pill.show(url: URL(string: "https://example.com"))
-        #expect(await eventually { pill.isHidden })
-        pill.corner.mouseEntered(with: pointerEvent(.mouseEntered))
-        #expect(await eventually { !pill.isHidden })
-        pill.corner.mouseExited(with: pointerEvent(.mouseExited))
+        pill.isShiftHeld = false
         #expect(pill.isHidden)
     }
     @Test func hoveringAPillCaughtFadingKeepsIt() async throws {
         let pill = DomainPill(frame: .zero)
         pill.reducesMotion = { false }
         pill.visibleFor = .milliseconds(20)
-        pill.show(url: URL(string: "https://example.com"))
+        pill.showNotice("a.zip")
         #expect(await eventually { pill.isFadingOut })
         pill.mouseEntered(with: event(.mouseEntered))
         #expect(!pill.isFadingOut)
@@ -182,10 +158,13 @@ import Testing
         try await Task.sleep(for: .milliseconds(400))
         #expect(!pill.isHidden)
     }
-    @Test func theCornerNeverTakesClicks() {
-        let pill = DomainPill(frame: .zero)
-        pill.corner.frame = NSRect(origin: .zero, size: DomainPill.cornerSize)
-        #expect(pill.corner.hitTest(NSPoint(x: 20, y: 5)) == nil)
+    @Test func onlyAHeldShiftLetsThePillTakeClicks() {
+        let pill = DomainPill(frame: NSRect(x: 0, y: 0, width: 120, height: 26))
+        pill.showNotice("a.zip")
+        #expect(!pill.isHidden)
+        #expect(pill.hitTest(NSPoint(x: 20, y: 10)) == nil) // a page link under a notice still takes the click
+        pill.isShiftHeld = true
+        #expect(pill.hitTest(NSPoint(x: 20, y: 10)) === pill)
     }
 
     /// A pill whose load has run past its delay, so it shows the host with the bar under it.
@@ -231,34 +210,22 @@ import Testing
         #expect(text(of: pill) == "b.example")
         #expect(pill.currentURL == redirect)
     }
-    @Test func aLoadThatShowedSettlesIntoTheHost() async throws {
+    @Test func aLoadThatShowedGoesWhenItEnds() async throws {
         let url = URL(string: "https://docs.example.com/a")!
         let pill = try await pillShowingALoad(to: url)
-        pill.visibleFor = .milliseconds(50)
         pill.update(url: url, progress: 1, isLoading: false)
         #expect(!pill.showsProgress)
         #expect(pill.bar.isHidden) // Motion is off in tests, so the bar fills, fades and goes at once
-        #expect(!pill.isHidden)
-        #expect(text(of: pill) == "docs.example.com")
-        #expect(await eventually { pill.isHidden })
+        #expect(pill.isHidden)
+        #expect(pill.currentURL == url)
     }
     @Test func aLoadThatEndsElsewhereSettlesOnWhereThePageIs() async throws {
         let pill = try await pillShowingALoad(to: URL(string: "https://b.example/")!)
+        pill.isShiftHeld = true
         let landed = URL(string: "https://a.example/")!
         pill.update(url: landed, progress: 1, isLoading: false)
-        #expect(text(of: pill) == "a.example")
+        #expect(text(of: pill) == "a.example") // the pill names the address a click copies
         #expect(pill.currentURL == landed)
-    }
-    @Test func aLoadThatEndsElsewhereWhileAHostIsOnItsClockNamesWhereThePageIs() async throws {
-        let pill = DomainPill(frame: .zero)
-        pill.progressDelay = .milliseconds(20)
-        pill.show(url: URL(string: "https://a.example/")) // the last page's host, still on its 2 s clock
-        pill.update(url: URL(string: "https://b.example/"), progress: 0.3, isLoading: true)
-        #expect(await eventually { pill.showsProgress })
-        let landed = URL(string: "https://c.example/")!
-        pill.update(url: landed, progress: 1, isLoading: false)
-        #expect(pill.currentURL == landed)
-        #expect(text(of: pill) == "c.example") // the pill names the address a click copies
     }
     @Test func aFailedLoadsErrorPageBringsNoBarBack() async throws {
         let url = URL(string: "https://docs.example.com/a")!
@@ -269,7 +236,7 @@ import Testing
         try await Task.sleep(for: .milliseconds(100))
         #expect(!pill.showsProgress)
         #expect(pill.bar.isHidden)
-        #expect(!pill.isHidden) // still on its 2 s clock
+        #expect(pill.isHidden)
     }
     @Test func aNoticeDuringALoadGivesWayToTheHost() async throws {
         let pill = try await pillShowingALoad(to: URL(string: "https://docs.example.com/a")!)
@@ -307,7 +274,7 @@ import Testing
         pill.showPage(url: URL(string: "https://b.example/"), progress: 1, isLoading: false)
         #expect(!pill.showsProgress)
         #expect(pill.bar.isHidden)
-        #expect(text(of: pill) == "b.example")
+        #expect(pill.isHidden) // nothing holds it, so the last page's load takes the pill with it
     }
     @Test func anotherPageStillLoadingShowsItsBarAfterTheDelay() async throws {
         let pill = try await pillShowingALoad(to: URL(string: "https://a.example/")!)
@@ -325,10 +292,10 @@ import Testing
         try await Task.sleep(for: .milliseconds(100))
         #expect(pill.isHidden)
     }
-    @Test func aLoadHoldsThePillWhenThePointerLeavesTheCorner() async throws {
+    @Test func aLoadHoldsThePillWhenShiftComesUp() async throws {
         let pill = try await pillShowingALoad(to: URL(string: "https://docs.example.com/a")!)
-        pill.isPointerInCorner = true
-        pill.isPointerInCorner = false
+        pill.isShiftHeld = true
+        pill.isShiftHeld = false
         #expect(!pill.isHidden)
     }
     @Test func theBarsRowMakesThePillTallerUntilTheLoadSettles() async {
@@ -336,6 +303,7 @@ import Testing
         pill.progressDelay = .zero
         let url = URL(string: "https://example.com")!
         pill.show(url: url)
+        pill.isShiftHeld = true
         let idle = pill.fittingSize.height
         pill.update(url: url, progress: 0.3, isLoading: true)
         #expect(await eventually { pill.showsProgress })
@@ -378,14 +346,15 @@ import Testing
         await finishLoading(tab) { tab.webView.loadHTMLString("<p>x</p>", baseURL: URL(string: "https://localhost/")) }
         #expect(sawLoading)
     }
-    @Test func aFinishedLoadInTheActiveTabShowsThePill() async throws {
+    @Test func aFinishedLoadInTheActiveTabNamesThePageButLeavesThePillHidden() async throws {
         let tabs = TabManager(profile: .temporary(), keepsSpare: false)
         let tab = tabs.newTab(nil, activate: true)
         let controller = make(tabs)
         #expect(controller.pill.isHidden)
         await finishLoading(tab) { tab.webView.loadHTMLString("<p>x</p>", baseURL: URL(string: "https://localhost/")) }
-        #expect(!controller.pill.isHidden)
+        #expect(controller.pill.isHidden)
         #expect(controller.pill.currentURL?.host() == "localhost")
+        #expect(controller.pill.bar.isHidden)
     }
     @Test func thePillStaysHiddenWhileTheRailShows() async throws {
         let tabs = TabManager(profile: .temporary(), keepsSpare: false)
@@ -393,6 +362,7 @@ import Testing
         let controller = make(tabs)
         controller.revealRailImmediately()
         await finishLoading(tab) { tab.webView.loadHTMLString("<p>x</p>", baseURL: URL(string: "https://localhost/")) }
+        holdShift(in: controller)
         #expect(controller.pill.isHidden)
     }
     @Test func thePillSitsAboveThePageAndBelowTheRail() throws {
@@ -407,30 +377,14 @@ import Testing
         #expect(try index < #require(order.firstIndex(of: controller.rail)))
         #expect(try index < #require(order.firstIndex(of: controller.switcher)))
     }
-    @Test func theCornerSitsAtTheBottomLeftAndReachesUnderThePillsEdgeOnly() throws {
-        let tabs = TabManager(profile: .temporary(), keepsSpare: false)
-        tabs.newTab(nil, activate: true)
-        let controller = make(tabs)
-        let window = try #require(controller.window)
-        let corner = controller.pill.corner
-        #expect(corner.superview === window.contentView)
-        #expect(corner.frame == NSRect(origin: .zero, size: DomainPill.cornerSize))
-        controller.pill.show(url: URL(string: "https://docs.example.com/"))
-        window.layoutIfNeeded()
-        let pill = controller.pill.frame
-        #expect(corner.frame.maxY > pill.minY)
-        #expect(corner.frame.maxY < pill.midY)
-        #expect(corner.frame.minX < pill.minX)
-        #expect(corner.frame.maxX > pill.minX)
-    }
-    @Test func theVeryCornerBringsUpThePillAndNotTheRail() throws {
+    @Test func theRailsStripReachesTheBottomOfTheWindow() throws {
         let tabs = TabManager(profile: .temporary(), keepsSpare: false)
         tabs.newTab(nil, activate: true)
         let controller = make(tabs)
         let content = try #require(controller.window?.contentView)
-        let railStrip = try #require(content.subviews.compactMap { $0 as? EdgeStrip }.first { $0 !== controller.pill.corner })
-        #expect(railStrip.frame.minY == DomainPill.cornerSize.height)
-        #expect(!railStrip.frame.intersects(controller.pill.corner.frame))
+        let strips = content.subviews.compactMap { $0 as? EdgeStrip }
+        #expect(strips.count == 1) // the corner has no strip of its own any more
+        #expect(try #require(strips.first).frame.minY == 0)
     }
     @Test func pageLinksInTheCornerStillTakeClicks() throws {
         let tabs = TabManager(profile: .temporary(), keepsSpare: false)
@@ -443,24 +397,21 @@ import Testing
             #expect(hit?.isDescendant(of: tab.pageView) == true, "at \(point)")
         }
     }
-    @Test func restingInTheCornerShowsTheActivePagesHostAndTheRailHidesIt() async {
+    @Test func holdingShiftShowsTheActivePagesHostAndTheRailHidesIt() async {
         let tabs = TabManager(profile: .temporary(), keepsSpare: false)
         let tab = tabs.newTab(nil, activate: true)
         let controller = make(tabs)
-        controller.pill.reducesMotion = { true }
-        controller.pill.visibleFor = .milliseconds(20)
         await finishLoading(tab) { tab.webView.loadHTMLString("<p>x</p>", baseURL: URL(string: "https://localhost/")) }
-        #expect(await eventually { controller.pill.isHidden })
-        controller.pill.corner.mouseEntered(with: pointerEvent(.mouseEntered))
-        #expect(await eventually { !controller.pill.isHidden })
+        #expect(controller.pill.isHidden)
+        holdShift(in: controller)
+        #expect(!controller.pill.isHidden)
         #expect(controller.pill.currentURL?.host() == "localhost")
         controller.revealRailImmediately()
         #expect(controller.pill.isHidden)
     }
-    @Test func aWindowWithNoPageShowsNothingInTheCorner() async throws {
+    @Test func holdingShiftInAWindowWithNoPageShowsNothing() {
         let controller = make(TabManager(profile: .temporary(), keepsSpare: false))
-        controller.pill.corner.mouseEntered(with: pointerEvent(.mouseEntered))
-        try await Task.sleep(for: .milliseconds(150))
+        holdShift(in: controller)
         #expect(controller.pill.isHidden)
     }
     @Test func aPinnedRailHasThePillBesideIt() throws {
@@ -472,6 +423,7 @@ import Testing
         controller.perform(.toggleRail)
         #expect(!controller.pill.isSuppressed)
         controller.pill.show(url: URL(string: "https://example.com"))
+        holdShift(in: controller)
         #expect(!controller.pill.isHidden)
         window.layoutIfNeeded()
         #expect(controller.pill.frame.minX == Rail.inset + Rail.width + 12)
@@ -495,18 +447,6 @@ import Testing
         controller.showNotice("a.zip")
         #expect(!controller.pill.isHidden)
     }
-    @Test func pinningTurnsTheCornerOffAndLetsGoOfThePointer() async {
-        let tabs = TabManager(profile: .temporary(), keepsSpare: false)
-        tabs.newTab(nil, activate: true)
-        let controller = make(tabs)
-        controller.pill.corner.mouseEntered(with: pointerEvent(.mouseEntered))
-        #expect(await eventually { controller.pill.isPointerInCorner })
-        controller.perform(.toggleRail)
-        #expect(controller.pill.corner.isHidden)
-        #expect(!controller.pill.isPointerInCorner)
-        controller.perform(.toggleRail)
-        #expect(!controller.pill.corner.isHidden)
-    }
     @Test func besideAPinnedRailInANarrowWindowThePillStopsShortOfTheBadge() throws {
         let tabs = TabManager(profile: .temporary(), keepsSpare: false)
         tabs.newTab(nil, activate: true)
@@ -515,6 +455,7 @@ import Testing
         window.setContentSize(NSSize(width: 480, height: 360))
         controller.perform(.toggleRail)
         controller.pill.show(url: URL(string: "https://a-rather-long-subdomain.of-an-example-host.example.co.uk/"))
+        holdShift(in: controller)
         window.layoutIfNeeded()
         #expect(controller.pill.frame.minX == Rail.inset + Rail.width + 12)
         // It shortens to the room it has, not to its padding.
@@ -527,6 +468,7 @@ import Testing
         let window = try #require(controller.window)
         window.setContentSize(NSSize(width: 1000, height: 600))
         controller.pill.show(url: URL(string: "https://a-rather-long-subdomain.of-an-example-host.example.co.uk/"))
+        holdShift(in: controller)
         window.layoutIfNeeded()
         let label = try #require(controller.pill.subviewsDeep.compactMap { $0 as? NSTextField }.first)
         #expect(label.frame.width >= label.intrinsicContentSize.width)
@@ -539,6 +481,7 @@ import Testing
         let window = try #require(controller.window)
         window.setContentSize(NSSize(width: 480, height: 360))
         controller.pill.show(url: URL(string: "https://a-rather-long-subdomain.of-an-example-host.example.co.uk/"))
+        holdShift(in: controller)
         window.layoutIfNeeded()
         #expect(controller.pill.frame.width == 480 * 0.6)
     }
@@ -558,15 +501,16 @@ import Testing
         tab.onProgress?(0.5, true)
         try #require(await eventually { controller.pill.showsProgress })
     }
-    @Test func aSlowLoadInTheActiveTabShowsTheBarThenTheHost() async {
+    @Test func aSlowLoadInTheActiveTabShowsTheBarUntilItEnds() async {
         let (controller, tab) = await windowWithASettledPage()
         tab.onProgress?(0.5, true)
         #expect(await eventually { controller.pill.showsProgress })
+        #expect(!controller.pill.isHidden)
         #expect(controller.pill.bar.fraction == 0.5)
         #expect(controller.pill.currentURL?.host() == "localhost")
         tab.onProgress?(1, false)
         #expect(!controller.pill.showsProgress)
-        #expect(!controller.pill.isHidden)
+        #expect(controller.pill.isHidden)
     }
     @Test func aBackgroundTabsLoadLeavesThePillAlone() async throws {
         let tabs = TabManager(profile: .temporary(), keepsSpare: false)
@@ -609,15 +553,5 @@ import Testing
         #expect(await eventually { controller.pill.showsProgress })
         #expect(!controller.pill.isHidden)
         #expect(!controller.pill.bar.isHidden)
-    }
-    @Test func aQuickLoadShowsTheHostWithoutABar() async {
-        let tabs = TabManager(profile: .temporary(), keepsSpare: false)
-        let tab = tabs.newTab(nil, activate: true)
-        let controller = make(tabs)
-        #expect(controller.pill.isHidden)
-        await finishLoading(tab) { tab.webView.loadHTMLString("<p>x</p>", baseURL: URL(string: "https://localhost/")) }
-        #expect(!controller.pill.isHidden)
-        #expect(controller.pill.currentURL?.host() == "localhost")
-        #expect(controller.pill.bar.isHidden)
     }
 }

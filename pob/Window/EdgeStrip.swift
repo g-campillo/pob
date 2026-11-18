@@ -1,6 +1,6 @@
 import AppKit
 
-/// Watches a stretch of the window's edge for the pointer: the left side for the rail, the bottom-left corner for the pill. It never takes clicks, so links there still work.
+/// Watches a stretch of the window's left edge for the pointer, which brings the rail out. It never takes clicks, so links there still work.
 final class EdgeStrip: NSView {
     static let width: CGFloat = 8
     private static let dwell: Duration = .milliseconds(60)
